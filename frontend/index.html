@@ -1,0 +1,1564 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>Lunar Rover Navigation — Mission Control</title>
+<style>
+:root {
+  --bg:      #0a0c12;
+  --panel:   #111520;
+  --border:  #1e2535;
+  --accent:  #00c8ff;
+  --green:   #00e676;
+  --orange:  #ff9100;
+  --red:     #ff3d3d;
+  --yellow:  #ffd740;
+  --text:    #c8d0e0;
+  --muted:   #4a5570;
+  --font:    'Courier New', monospace;
+}
+* { box-sizing: border-box; margin: 0; padding: 0; }
+html, body { height: 100%; background: var(--bg); color: var(--text); font-family: var(--font); font-size: 12px; overflow: hidden; }
+
+/* ── Layout ─────────────────────────────────────────────────────────────────── */
+#shell { display: flex; flex-direction: column; height: 100vh; }
+
+/* Header */
+#topbar { display: flex; align-items: center; gap: 12px; padding: 6px 14px;
+  background: var(--panel); border-bottom: 1px solid var(--border); flex-shrink: 0; }
+#topbar .logo { font-size: 13px; font-weight: bold; color: var(--accent); letter-spacing: .05em; }
+#topbar .sep { color: var(--border); }
+.badge { padding: 2px 8px; border-radius: 3px; font-size: 10px; letter-spacing: .06em; font-weight: bold; }
+.b-idle { background:#1a2230; color:var(--muted); border:1px solid var(--muted); }
+.b-plan { background:#0d2040; color:var(--accent); border:1px solid var(--accent); }
+.b-run  { background:#0d2a0d; color:var(--green);  border:1px solid var(--green); }
+.b-warn { background:#2a1a00; color:var(--orange); border:1px solid var(--orange); }
+.b-err  { background:#2a0d0d; color:var(--red);    border:1px solid var(--red); }
+.b-ok   { background:#0d2a1a; color:var(--green);  border:1px solid var(--green); }
+#topbar .right { margin-left: auto; display: flex; gap: 12px; align-items: center; font-size: 10px; color: var(--muted); }
+
+/* Tab strip */
+#tabbar { display: flex; gap: 1px; background: var(--border); border-bottom: 1px solid var(--border); flex-shrink: 0; }
+.tab { padding: 7px 14px; font-size: 10px; letter-spacing: .06em; cursor: pointer;
+  background: var(--panel); color: var(--muted); border: none; transition: all .15s; }
+.tab:hover { color: var(--text); }
+.tab.active { background: var(--bg); color: var(--accent); border-bottom: 2px solid var(--accent); }
+
+/* Main body */
+#body { display: flex; flex: 1; overflow: hidden; }
+
+/* Left sidebar */
+#sidebar { width: 200px; flex-shrink: 0; background: var(--panel);
+  border-right: 1px solid var(--border); display: flex; flex-direction: column; gap: 0; overflow-y: auto; }
+.side-section { border-bottom: 1px solid var(--border); padding: 10px; }
+.side-title { font-size: 9px; letter-spacing: .08em; color: var(--muted); text-transform: uppercase; margin-bottom: 8px; }
+
+/* Algo status rows */
+.arow { display: flex; align-items: center; gap: 6px; padding: 4px 0; font-size: 10px; }
+.dot  { width: 6px; height: 6px; border-radius: 50%; flex-shrink: 0; }
+.d-off  { background: var(--muted); }
+.d-idle { background: var(--border); }
+.d-on   { background: var(--green); box-shadow: 0 0 4px var(--green); }
+.d-warn { background: var(--orange); box-shadow: 0 0 4px var(--orange); }
+.d-err  { background: var(--red); box-shadow: 0 0 4px var(--red); }
+
+/* Stat cards */
+.stat-grid { display: grid; grid-template-columns: 1fr 1fr; gap: 4px; }
+.scard { background: var(--bg); border: 1px solid var(--border); border-radius: 3px; padding: 5px 7px; }
+.scard .label { font-size: 8px; color: var(--muted); margin-bottom: 1px; }
+.scard .val { font-size: 14px; color: var(--text); }
+.scard .val.accent { color: var(--accent); }
+
+/* Content panes */
+#content { flex: 1; overflow: hidden; display: flex; flex-direction: column; }
+.pane { display: none; flex: 1; overflow: hidden; }
+.pane.active { display: flex; }
+
+/* ── Canvas pane ─────────────────────────────────────────────────────────────── */
+#pane-map { flex-direction: row; gap: 0; }
+#map-wrap { flex: 1; position: relative; }
+#mapCanvas { display: block; width: 100%; height: 100%; image-rendering: pixelated; cursor: crosshair; }
+.map-overlay { position: absolute; top: 8px; left: 8px; display: flex; flex-direction: column; gap: 5px; }
+.map-btn { padding: 4px 10px; font-size: 10px; border: 1px solid var(--border); border-radius: 3px;
+  background: rgba(17,21,32,.85); color: var(--text); cursor: pointer; font-family: var(--font); }
+.map-btn:hover { border-color: var(--accent); color: var(--accent); }
+.map-btn.on { border-color: var(--accent); color: var(--accent); background: rgba(0,200,255,.1); }
+.legend-bar { position: absolute; bottom: 8px; left: 8px; display: flex; gap: 10px; flex-wrap: wrap; }
+.lg { display: flex; align-items: center; gap: 4px; font-size: 9px; color: var(--muted); }
+.lg-sq { width: 10px; height: 10px; border-radius: 2px; }
+
+/* ── Mission setup pane ──────────────────────────────────────────────────────── */
+#pane-setup { flex-direction: column; overflow-y: auto; padding: 16px; gap: 14px; }
+.form-card { background: var(--panel); border: 1px solid var(--border); border-radius: 5px; padding: 14px; }
+.form-title { font-size: 10px; letter-spacing: .08em; color: var(--accent); text-transform: uppercase; margin-bottom: 12px; }
+.form-row { display: flex; gap: 10px; margin-bottom: 8px; align-items: flex-end; }
+.field { display: flex; flex-direction: column; gap: 3px; flex: 1; }
+.field label { font-size: 9px; color: var(--muted); }
+.field input, .field select { background: var(--bg); border: 1px solid var(--border); color: var(--text);
+  padding: 5px 8px; font-family: var(--font); font-size: 11px; border-radius: 3px; outline: none; }
+.field input:focus, .field select:focus { border-color: var(--accent); }
+.mode-tabs { display: flex; gap: 4px; margin-bottom: 12px; }
+.mode-tab { padding: 4px 12px; font-size: 10px; cursor: pointer; border: 1px solid var(--border);
+  border-radius: 3px; background: var(--bg); color: var(--muted); }
+.mode-tab.on { border-color: var(--accent); color: var(--accent); background: rgba(0,200,255,.08); }
+.btn-primary { padding: 8px 20px; background: var(--accent); color: var(--bg); font-family: var(--font);
+  font-size: 11px; font-weight: bold; border: none; border-radius: 3px; cursor: pointer; letter-spacing: .04em; }
+.btn-primary:hover { opacity: .85; }
+.btn-secondary { padding: 6px 14px; background: var(--panel); color: var(--text); font-family: var(--font);
+  font-size: 11px; border: 1px solid var(--border); border-radius: 3px; cursor: pointer; }
+.btn-secondary:hover { border-color: var(--accent); color: var(--accent); }
+.btn-danger { padding: 6px 14px; background: rgba(255,61,61,.1); color: var(--red); font-family: var(--font);
+  font-size: 11px; border: 1px solid var(--red); border-radius: 3px; cursor: pointer; }
+
+/* ── LiDAR pane ──────────────────────────────────────────────────────────────── */
+#pane-lidar { flex-direction: column; overflow-y: auto; padding: 16px; gap: 14px; }
+#lidar-polar { background: var(--panel); border: 1px solid var(--border); border-radius: 5px; }
+.scan-table { width: 100%; border-collapse: collapse; font-size: 10px; }
+.scan-table th { padding: 4px 8px; border-bottom: 1px solid var(--border); color: var(--muted); text-align: left; font-size: 9px; }
+.scan-table td { padding: 3px 8px; border-bottom: 1px solid var(--border); color: var(--text); }
+.scan-table tr:hover td { background: rgba(0,200,255,.03); }
+
+/* ── Algorithm comparison pane ───────────────────────────────────────────────── */
+#pane-algo { flex-direction: column; overflow-y: auto; padding: 16px; gap: 14px; }
+.algo-grid { display: grid; grid-template-columns: repeat(4, 1fr); gap: 10px; }
+.algo-card { background: var(--panel); border: 1px solid var(--border); border-radius: 5px; padding: 12px; }
+.algo-name { font-size: 12px; font-weight: bold; color: var(--accent); margin-bottom: 8px; }
+.algo-metric { display: flex; justify-content: space-between; padding: 3px 0;
+  border-bottom: 1px solid var(--border); font-size: 10px; }
+.algo-metric .k { color: var(--muted); }
+.algo-metric .v { color: var(--text); }
+.algo-metric .v.best { color: var(--green); }
+.bar-row { margin-top: 8px; }
+.bar-label { font-size: 9px; color: var(--muted); margin-bottom: 2px; }
+.bar-track { background: var(--bg); height: 6px; border-radius: 3px; overflow: hidden; }
+.bar-fill  { height: 100%; border-radius: 3px; transition: width .5s; }
+
+/* ── Mineral pane ────────────────────────────────────────────────────────────── */
+#pane-mineral { flex-direction: column; overflow-y: auto; padding: 16px; gap: 14px; }
+.mineral-grid { display: grid; grid-template-columns: repeat(3, 1fr); gap: 10px; }
+.mineral-card { background: var(--panel); border: 1px solid var(--border); border-radius: 5px; padding: 14px; }
+.mineral-name { font-size: 13px; font-weight: bold; margin-bottom: 6px; }
+.mineral-avg  { font-size: 24px; font-weight: bold; }
+.mineral-unit { font-size: 10px; color: var(--muted); margin-bottom: 8px; }
+.exposure-bar { height: 8px; border-radius: 4px; overflow: hidden; background: var(--bg); margin-top: 8px; }
+.exposure-fill { height: 100%; border-radius: 4px; }
+
+/* ── Log pane ────────────────────────────────────────────────────────────────── */
+#pane-log { flex-direction: column; }
+#logbox { flex: 1; overflow-y: auto; padding: 10px; font-size: 10px; line-height: 1.8; }
+.le  { padding: 1px 0; border-bottom: 1px solid rgba(30,37,53,.5); }
+.li  { color: var(--accent); }
+.lw  { color: var(--orange); }
+.le2 { color: var(--red); }
+.ls  { color: var(--green); }
+.ln  { color: var(--text); }
+
+/* Right panel (log + controls) */
+#rightpanel { width: 220px; flex-shrink: 0; display: flex; flex-direction: column;
+  background: var(--panel); border-left: 1px solid var(--border); }
+.rp-section { border-bottom: 1px solid var(--border); padding: 10px; }
+.rp-title { font-size: 9px; letter-spacing: .08em; color: var(--muted); text-transform: uppercase; margin-bottom: 8px; }
+#minilog { flex: 1; overflow-y: auto; font-size: 10px; line-height: 1.7; padding: 8px; }
+.ctrl-row { display: flex; gap: 5px; flex-wrap: wrap; margin-bottom: 5px; }
+.ctrl-btn { padding: 5px 10px; font-size: 10px; font-family: var(--font); border-radius: 3px;
+  border: 1px solid var(--border); background: var(--bg); color: var(--text); cursor: pointer; }
+.ctrl-btn:hover { border-color: var(--accent); color: var(--accent); }
+.ctrl-btn.prim { background: rgba(0,200,255,.12); border-color: var(--accent); color: var(--accent); }
+.ctrl-btn:disabled { opacity: .35; cursor: default; }
+
+/* Misc */
+.section-hdr { font-size: 10px; letter-spacing: .06em; color: var(--accent); text-transform: uppercase;
+  padding: 6px 0; border-bottom: 1px solid var(--border); margin-bottom: 10px; }
+.info-row { display: flex; justify-content: space-between; padding: 3px 0;
+  border-bottom: 1px solid var(--border); font-size: 10px; }
+.info-row .k { color: var(--muted); }
+.info-row .v { color: var(--text); }
+input[type=range] { width: 100%; accent-color: var(--accent); }
+</style>
+</head>
+<body>
+<div id="shell">
+
+<!-- ── Top Bar ─────────────────────────────────────────────────────────────── -->
+<div id="topbar">
+  <span class="logo">◉ LUNAR ROVER NAV</span>
+  <span class="sep">│</span>
+  <span class="badge b-idle" id="phase-badge">IDLE</span>
+  <span class="badge b-idle" id="algo-badge">NO MISSION</span>
+  <div class="right">
+    <span>Chandrayaan-2 South Pole | 100 km alt | 5 m/px</span>
+    <span>RPLiDAR A3 — 100 m range</span>
+    <span id="clock">--:--:--</span>
+    <span id="api-status" style="color:var(--orange)">⬤ API</span>
+  </div>
+</div>
+
+<!-- ── Tab Bar ─────────────────────────────────────────────────────────────── -->
+<div id="tabbar">
+  <button class="tab active" data-tab="map">① TERRAIN MAP</button>
+  <button class="tab" data-tab="setup">② MISSION SETUP</button>
+  <button class="tab" data-tab="lidar">③ LIDAR / REPLAN</button>
+  <button class="tab" data-tab="algo">④ ALGORITHMS</button>
+  <button class="tab" data-tab="mineral">⑤ MINERALS</button>
+  <button class="tab" data-tab="log">⑥ FULL LOG</button>
+</div>
+
+<!-- ── Body ───────────────────────────────────────────────────────────────── -->
+<div id="body">
+
+  <!-- Left sidebar -->
+  <div id="sidebar">
+    <!-- Algorithm status -->
+    <div class="side-section">
+      <div class="side-title">Algorithm Status</div>
+      <div class="arow"><div class="dot d-idle" id="dot-astar"></div><span id="lbl-astar">A* — idle</span></div>
+      <div class="arow"><div class="dot d-off"  id="dot-hastar"></div><span id="lbl-hastar">Hybrid A* — standby</span></div>
+      <div class="arow"><div class="dot d-off"  id="dot-dstar"></div><span id="lbl-dstar">D* Lite — standby</span></div>
+      <div class="arow"><div class="dot d-off"  id="dot-rrt"></div><span id="lbl-rrt">RRT* — standby</span></div>
+      <div class="arow"><div class="dot d-off"  id="dot-unet"></div><span id="lbl-unet">U-Net — standby</span></div>
+      <div class="arow"><div class="dot d-off"  id="dot-lidar"></div><span id="lbl-lidar">RPLiDAR A3 — off</span></div>
+    </div>
+
+    <!-- Mission stats -->
+    <div class="side-section">
+      <div class="side-title">Mission Stats</div>
+      <div class="stat-grid">
+        <div class="scard"><div class="label">Mission ID</div><div class="val accent" id="s-id">—</div></div>
+        <div class="scard"><div class="label">Status</div><div class="val" id="s-status">—</div></div>
+        <div class="scard"><div class="label">Distance (m)</div><div class="val" id="s-dist">—</div></div>
+        <div class="scard"><div class="label">Energy (Wh)</div><div class="val" id="s-energy">—</div></div>
+        <div class="scard"><div class="label">Waypoints</div><div class="val" id="s-wpts">—</div></div>
+        <div class="scard"><div class="label">Risk Score</div><div class="val" id="s-risk">—</div></div>
+        <div class="scard"><div class="label">Max Slope°</div><div class="val" id="s-slope">—</div></div>
+        <div class="scard"><div class="label">Replans</div><div class="val" id="s-rep">0</div></div>
+      </div>
+    </div>
+
+    <!-- Layer toggles -->
+    <div class="side-section">
+      <div class="side-title">Map Layers</div>
+      <div style="display:flex;flex-direction:column;gap:4px">
+        <label style="display:flex;align-items:center;gap:6px;font-size:10px;cursor:pointer">
+          <input type="checkbox" id="l-terrain" checked> Elevation
+        </label>
+        <label style="display:flex;align-items:center;gap:6px;font-size:10px;cursor:pointer">
+          <input type="checkbox" id="l-crater" checked> Craters
+        </label>
+        <label style="display:flex;align-items:center;gap:6px;font-size:10px;cursor:pointer">
+          <input type="checkbox" id="l-mineral" checked> Minerals
+        </label>
+        <label style="display:flex;align-items:center;gap:6px;font-size:10px;cursor:pointer">
+          <input type="checkbox" id="l-slope" checked> Slope heat
+        </label>
+        <label style="display:flex;align-items:center;gap:6px;font-size:10px;cursor:pointer">
+          <input type="checkbox" id="l-path" checked> Path
+        </label>
+        <label style="display:flex;align-items:center;gap:6px;font-size:10px;cursor:pointer">
+          <input type="checkbox" id="l-lidar-r" checked> LiDAR ring
+        </label>
+        <label style="display:flex;align-items:center;gap:6px;font-size:10px;cursor:pointer">
+          <input type="checkbox" id="l-fog" checked> Fog of war
+        </label>
+      </div>
+    </div>
+
+    <!-- Speed -->
+    <div class="side-section">
+      <div class="side-title">Sim Speed</div>
+      <input type="range" id="spd" min="1" max="20" value="6">
+      <div style="text-align:center;margin-top:4px;font-size:10px;color:var(--accent)" id="spd-val">6×</div>
+    </div>
+  </div>
+
+  <!-- Content panes -->
+  <div id="content">
+
+    <!-- ① Terrain Map ───────────────────────────────────────────────────── -->
+    <div class="pane active" id="pane-map">
+      <div id="map-wrap">
+        <canvas id="mapCanvas"></canvas>
+        <div class="map-overlay">
+          <button class="map-btn" id="btn-newmap">New Map</button>
+          <button class="map-btn" id="btn-plan">Plan A*</button>
+          <button class="map-btn" id="btn-start">Start ▶</button>
+          <button class="map-btn" id="btn-pause">Pause ⏸</button>
+          <button class="map-btn" id="btn-reset">Reset ↺</button>
+        </div>
+        <div class="legend-bar">
+          <div class="lg"><div class="lg-sq" style="background:#555"></div>Terrain</div>
+          <div class="lg"><div class="lg-sq" style="background:#080c18"></div>Crater</div>
+          <div class="lg"><div class="lg-sq" style="background:#cc2200"></div>Hidden obs.</div>
+          <div class="lg"><div class="lg-sq" style="background:#1a5ad4"></div>Mineral</div>
+          <div class="lg"><div class="lg-sq" style="background:#c85800"></div>Slope</div>
+          <div class="lg"><div class="lg-sq" style="background:#00e676"></div>A* path</div>
+          <div class="lg"><div class="lg-sq" style="background:#ff9100"></div>D* replan</div>
+          <div class="lg"><div class="lg-sq" style="background:#ff3d3d"></div>RRT* path</div>
+        </div>
+      </div>
+    </div>
+
+    <!-- ② Mission Setup ─────────────────────────────────────────────────── -->
+    <div class="pane" id="pane-setup">
+      <div class="form-card" style="max-width:700px">
+        <div class="form-title">Mission Configuration</div>
+
+        <div class="mode-tabs">
+          <button class="mode-tab on" id="mt-latlon">Lat / Lon Mode</button>
+          <button class="mode-tab" id="mt-pixel">Image Pixel Mode</button>
+        </div>
+
+        <!-- Lat/Lon inputs -->
+        <div id="latlon-fields">
+          <div class="form-row">
+            <div class="field">
+              <label>Start Latitude (°)</label>
+              <input type="number" id="start-lat" value="-85.5" step="0.01">
+            </div>
+            <div class="field">
+              <label>Start Longitude (°)</label>
+              <input type="number" id="start-lon" value="10.0" step="0.01">
+            </div>
+          </div>
+          <div class="form-row">
+            <div class="field">
+              <label>Goal Latitude (°)</label>
+              <input type="number" id="goal-lat" value="-85.3" step="0.01">
+            </div>
+            <div class="field">
+              <label>Goal Longitude (°)</label>
+              <input type="number" id="goal-lon" value="10.2" step="0.01">
+            </div>
+          </div>
+        </div>
+
+        <!-- Pixel inputs -->
+        <div id="pixel-fields" style="display:none">
+          <div class="form-row">
+            <div class="field">
+              <label>Start X (pixel col)</label>
+              <input type="number" id="start-px" value="120">
+            </div>
+            <div class="field">
+              <label>Start Y (pixel row)</label>
+              <input type="number" id="start-py" value="340">
+            </div>
+          </div>
+          <div class="form-row">
+            <div class="field">
+              <label>Goal X (pixel col)</label>
+              <input type="number" id="goal-px" value="800">
+            </div>
+            <div class="field">
+              <label>Goal Y (pixel row)</label>
+              <input type="number" id="goal-py" value="600">
+            </div>
+          </div>
+          <div class="form-row">
+            <div class="field" style="flex:2">
+              <label>VRT File Path</label>
+              <input type="text" id="vrt-path" value="data/lunar_map.vrt">
+            </div>
+          </div>
+        </div>
+
+        <div class="form-row" style="margin-top:10px">
+          <div class="field">
+            <label>API Base URL</label>
+            <input type="text" id="api-url" value="http://127.0.0.1:8000">
+          </div>
+        </div>
+
+        <div class="form-row" style="margin-top:6px">
+          <label style="display:flex;align-items:center;gap:6px;font-size:10px;cursor:pointer">
+            <input type="checkbox" id="opt-heuristic" checked> Use physics heuristic (no GPU needed)
+          </label>
+          <label style="display:flex;align-items:center;gap:6px;font-size:10px;cursor:pointer;margin-left:16px">
+            <input type="checkbox" id="opt-smooth" checked> Smooth path (Savitzky-Golay)
+          </label>
+        </div>
+
+        <div style="display:flex;gap:10px;margin-top:16px">
+          <button class="btn-primary" id="btn-create-mission">Create Mission →</button>
+          <button class="btn-secondary" id="btn-poll">Poll Status</button>
+          <button class="btn-danger" id="btn-delete-mission" style="margin-left:auto">Delete Mission</button>
+        </div>
+
+        <div id="mission-response" style="margin-top:14px;padding:10px;background:var(--bg);
+          border:1px solid var(--border);border-radius:3px;font-size:10px;
+          white-space:pre-wrap;display:none"></div>
+      </div>
+
+      <!-- Active missions list -->
+      <div class="form-card" style="max-width:700px">
+        <div class="form-title">Active Missions</div>
+        <button class="btn-secondary" id="btn-list-missions" style="margin-bottom:10px">Refresh List</button>
+        <div id="mission-list" style="font-size:10px"></div>
+      </div>
+    </div>
+
+    <!-- ③ LiDAR / Replan ────────────────────────────────────────────────── -->
+    <div class="pane" id="pane-lidar">
+      <div class="form-card" style="max-width:700px">
+        <div class="form-title">RPLiDAR A3 — Obstacle Injection</div>
+        <div style="color:var(--muted);font-size:10px;margin-bottom:12px">
+          Paste raw RPLiDAR A3 scan data below (theta / dist / quality per line) 
+          or add obstacles manually. Triggers D* Lite replanning.
+        </div>
+
+        <div class="form-row">
+          <div class="field" style="flex:2">
+            <label>Raw Scan Input (theta: 10.23  Dist: 1532.45  Q: 47)</label>
+            <textarea id="lidar-raw" style="background:var(--bg);border:1px solid var(--border);
+              color:var(--text);padding:6px 8px;font-family:var(--font);font-size:10px;
+              border-radius:3px;resize:vertical;height:100px;width:100%"
+              placeholder="theta: 10.23  Dist: 1532.45  Q: 47&#10;theta: 11.01  Dist: 1498.32  Q: 48"></textarea>
+          </div>
+        </div>
+
+        <div class="form-row">
+          <div class="field">
+            <label>Rover Row (pixels)</label>
+            <input type="number" id="rover-row" value="50">
+          </div>
+          <div class="field">
+            <label>Rover Col (pixels)</label>
+            <input type="number" id="rover-col" value="50">
+          </div>
+          <div class="field">
+            <label>Pixels per Metre</label>
+            <input type="number" id="ppm" value="0.2" step="0.05">
+          </div>
+        </div>
+
+        <div style="display:flex;gap:10px;margin-top:12px">
+          <button class="btn-primary" id="btn-parse-scan">Parse &amp; Send →</button>
+          <button class="btn-secondary" id="btn-inject-only">Process Only</button>
+        </div>
+      </div>
+
+      <!-- Manual obstacle entry -->
+      <div class="form-card" style="max-width:700px">
+        <div class="form-title">Manual Obstacle Entry</div>
+        <div class="form-row">
+          <div class="field"><label>X (col)</label><input type="number" id="obs-x" value="120"></div>
+          <div class="field"><label>Y (row)</label><input type="number" id="obs-y" value="80"></div>
+          <div class="field"><label>Radius (px)</label><input type="number" id="obs-r" value="5"></div>
+          <div style="display:flex;align-items:flex-end">
+            <button class="btn-secondary" id="btn-add-obs">Add</button>
+          </div>
+        </div>
+        <div id="obs-list" style="margin-top:8px;font-size:10px"></div>
+        <div style="display:flex;gap:10px;margin-top:10px">
+          <button class="btn-primary" id="btn-send-obstacles">Send Obstacles + Replan</button>
+          <button class="btn-secondary" id="btn-clear-obs">Clear All</button>
+        </div>
+      </div>
+
+      <!-- Scan results -->
+      <div class="form-card" style="max-width:700px">
+        <div class="form-title">Scan Results</div>
+        <div id="scan-results" style="font-size:10px;color:var(--muted)">No scan processed yet.</div>
+      </div>
+    </div>
+
+    <!-- ④ Algorithm Comparison ──────────────────────────────────────────── -->
+    <div class="pane" id="pane-algo">
+      <div class="section-hdr">Algorithm Performance Comparison</div>
+      <div class="algo-grid" id="algo-grid">
+        <!-- Cards injected by JS -->
+      </div>
+      <div style="margin-top:14px">
+        <div class="section-hdr">Selection Logic</div>
+        <div style="background:var(--panel);border:1px solid var(--border);border-radius:5px;padding:12px;font-size:10px;line-height:1.9;color:var(--text)">
+          <b style="color:var(--accent)">Step 1 — A*:</b> Global optimal path. Fast (2-5 s), deterministic. Used at mission start.<br>
+          <b style="color:var(--accent)">Step 2 — Hybrid A*:</b> Kinematic-aware. Tried if A* finds suboptimal path in complex terrain.<br>
+          <b style="color:var(--accent)">Step 3 — D* Lite:</b> Incremental replan (1-5 Hz) when RPLiDAR A3 detects new obstacles.<br>
+          <b style="color:var(--accent)">Step 4 — RRT*:</b> Sampling-based emergency fallback. Activates if D* fails 3× (local minima / trapped).
+        </div>
+      </div>
+    </div>
+
+    <!-- ⑤ Mineral Analysis ──────────────────────────────────────────────── -->
+    <div class="pane" id="pane-mineral">
+      <div class="section-hdr">Mineral Exposure Along Path — Chandrayaan-2 CLASS + IIRS</div>
+      <div class="mineral-grid" id="mineral-grid">
+        <!-- Cards injected by JS -->
+      </div>
+      <div style="margin-top:14px">
+        <div class="section-hdr">Regional Summary</div>
+        <div id="mineral-table" style="font-size:10px;color:var(--muted)">
+          No mineral data yet. Complete a mission to see results.
+        </div>
+      </div>
+    </div>
+
+    <!-- ⑥ Full Log ──────────────────────────────────────────────────────── -->
+    <div class="pane" id="pane-log">
+      <div style="display:flex;justify-content:space-between;align-items:center;padding:8px 12px;
+        border-bottom:1px solid var(--border)">
+        <span style="font-size:10px;letter-spacing:.06em;color:var(--muted)">MISSION LOG</span>
+        <button class="ctrl-btn" id="btn-clear-log">Clear</button>
+      </div>
+      <div id="logbox"></div>
+    </div>
+
+  </div><!-- /content -->
+
+  <!-- Right panel -->
+  <div id="rightpanel">
+    <div class="rp-section">
+      <div class="rp-title">Controls</div>
+      <div class="ctrl-row">
+        <button class="ctrl-btn prim" id="rc-newmap">New Map</button>
+        <button class="ctrl-btn" id="rc-plan">Plan</button>
+      </div>
+      <div class="ctrl-row">
+        <button class="ctrl-btn" id="rc-start">▶ Start</button>
+        <button class="ctrl-btn" id="rc-pause">⏸ Pause</button>
+        <button class="ctrl-btn" id="rc-reset">↺ Reset</button>
+      </div>
+    </div>
+
+    <div class="rp-section">
+      <div class="rp-title">WebSocket</div>
+      <div class="arow">
+        <div class="dot d-off" id="dot-ws"></div>
+        <span id="lbl-ws" style="font-size:10px">Disconnected</span>
+      </div>
+      <div style="margin-top:6px">
+        <button class="ctrl-btn" id="btn-ws-connect">Connect WS</button>
+      </div>
+    </div>
+
+    <div class="rp-section">
+      <div class="rp-title">Live Telemetry</div>
+      <div style="font-size:10px;display:flex;flex-direction:column;gap:3px">
+        <div class="info-row"><span class="k">Step</span><span class="v" id="tele-step">—</span></div>
+        <div class="info-row"><span class="k">Lat</span><span class="v" id="tele-lat">—</span></div>
+        <div class="info-row"><span class="k">Lon</span><span class="v" id="tele-lon">—</span></div>
+        <div class="info-row"><span class="k">Elev (m)</span><span class="v" id="tele-elev">—</span></div>
+        <div class="info-row"><span class="k">Energy (Wh)</span><span class="v" id="tele-energy">—</span></div>
+        <div class="info-row"><span class="k">Cum dist (m)</span><span class="v" id="tele-dist">—</span></div>
+        <div class="info-row"><span class="k">Cost</span><span class="v" id="tele-cost">—</span></div>
+      </div>
+    </div>
+
+    <div class="rp-section" style="flex:1;overflow:hidden;display:flex;flex-direction:column">
+      <div class="rp-title">Live Log</div>
+      <div id="minilog" style="flex:1;overflow-y:auto"></div>
+    </div>
+  </div>
+
+</div><!-- /body -->
+</div><!-- /shell -->
+
+<script>
+'use strict';
+
+// ═══════════════════════════════════════════════════════════════════════════════
+// Config & State
+// ═══════════════════════════════════════════════════════════════════════════════
+const COLS=100, ROWS=65, CELL=10, LR_PX=18, CELL_M=5;
+let apiBase = 'http://127.0.0.1:8000';
+let activeMissionId = null;
+let ws = null;
+let grid = [], path = null, replanPath = null, rrtNodes = null;
+let pathIdx=0, rFrac=0, moving=false, paused=false;
+let phase='idle', failCount=0;
+let mTime=0, lastTs=0, speed=6;
+let stats = {dist:0, rep:0, obs:0, min:0, rrt:0, eng:0};
+let terrainCache = null;
+let manualObstacles = [];
+let layers = {terrain:true,crater:true,mineral:true,slope:true,path:true,'lidar-r':true,fog:true};
+let startP={r:32,c:3}, goalP={r:32,c:96};
+
+// ═══════════════════════════════════════════════════════════════════════════════
+// Utilities
+// ═══════════════════════════════════════════════════════════════════════════════
+const rnd=(a,b)=>a+Math.random()*(b-a);
+const ri=(a,b)=>Math.floor(rnd(a,b+1));
+const clamp=(v,a,b)=>Math.max(a,Math.min(b,v));
+
+function addLog(msg, type='n') {
+  const ts = new Date().toLocaleTimeString();
+  const cls = {n:'ln',i:'li',w:'lw',e:'le2',s:'ls'}[type]||'ln';
+  const html = `<div class="le ${cls}">[${ts}] ${msg}</div>`;
+  document.getElementById('logbox').insertAdjacentHTML('afterbegin', html);
+  document.getElementById('minilog').insertAdjacentHTML('afterbegin', html);
+  // Trim to 200 lines
+  const lb = document.getElementById('logbox');
+  while(lb.children.length > 200) lb.removeChild(lb.lastChild);
+}
+
+function setPhase(p) {
+  phase = p;
+  const badge = document.getElementById('phase-badge');
+  const map = {
+    idle:       ['b-idle','IDLE'],
+    planning:   ['b-plan','PLANNING'],
+    moving:     ['b-run','TRAVERSAL'],
+    replanning: ['b-warn','D* REPLAN'],
+    rrt:        ['b-err','RRT* EMERGENCY'],
+    success:    ['b-ok','SUCCESS'],
+    failed:     ['b-err','FAILED'],
+  };
+  if(map[p]) { badge.className='badge '+map[p][0]; badge.textContent=map[p][1]; }
+}
+
+function setDot(id, state, lbl) {
+  const d=document.getElementById('dot-'+id), l=document.getElementById('lbl-'+id);
+  const cls={on:'d-on',w:'d-warn',e:'d-err',off:'d-off',idle:'d-idle'}[state]||'d-idle';
+  if(d) d.className='dot '+cls;
+  if(l&&lbl) l.textContent=lbl;
+}
+
+function updateStats() {
+  document.getElementById('s-dist').textContent   = Math.round(stats.dist);
+  document.getElementById('s-energy').textContent = stats.eng.toFixed(1);
+  document.getElementById('s-rep').textContent    = stats.rep;
+  document.getElementById('s-id').textContent     = activeMissionId||'—';
+}
+
+// ═══════════════════════════════════════════════════════════════════════════════
+// Clock
+// ═══════════════════════════════════════════════════════════════════════════════
+setInterval(()=>{
+  document.getElementById('clock').textContent = new Date().toLocaleTimeString();
+}, 1000);
+
+// ═══════════════════════════════════════════════════════════════════════════════
+// API helpers
+// ═══════════════════════════════════════════════════════════════════════════════
+async function apiGet(path) {
+  try {
+    const r = await fetch(`${apiBase}${path}`);
+    if(!r.ok) throw new Error(`HTTP ${r.status}`);
+    return await r.json();
+  } catch(e) { addLog(`GET ${path} failed: ${e.message}`,'e'); return null; }
+}
+
+async function apiPost(path, body) {
+  try {
+    const r = await fetch(`${apiBase}${path}`, {
+      method:'POST', headers:{'Content-Type':'application/json'},
+      body: JSON.stringify(body)
+    });
+    const data = await r.json();
+    if(!r.ok) throw new Error(data.detail||`HTTP ${r.status}`);
+    return data;
+  } catch(e) { addLog(`POST ${path} failed: ${e.message}`,'e'); return null; }
+}
+
+async function apiDelete(path) {
+  try {
+    const r = await fetch(`${apiBase}${path}`, {method:'DELETE'});
+    if(!r.ok) throw new Error(`HTTP ${r.status}`);
+    return await r.json();
+  } catch(e) { addLog(`DELETE ${path} failed: ${e.message}`,'e'); return null; }
+}
+
+// ── API health check ──────────────────────────────────────────────────────────
+async function checkApiHealth() {
+  const el = document.getElementById('api-status');
+  try {
+    const d = await fetch(`${apiBase}/health`, {signal: AbortSignal.timeout(3000)});
+    if(d.ok) {
+      el.style.color = 'var(--green)';
+      el.textContent = '⬤ API OK';
+    } else throw new Error();
+  } catch {
+    el.style.color = 'var(--red)';
+    el.textContent = '⬤ API OFFLINE';
+  }
+}
+checkApiHealth();
+setInterval(checkApiHealth, 15000);
+
+// ═══════════════════════════════════════════════════════════════════════════════
+// WebSocket
+// ═══════════════════════════════════════════════════════════════════════════════
+function connectWS(missionId) {
+  if(ws) ws.close();
+  const url = `${apiBase.replace('http','ws')}/ws/mission/${missionId}/stream`;
+  ws = new WebSocket(url);
+
+  ws.onopen = () => {
+    setDot('ws','on','Connected');
+    addLog(`WS connected — mission ${missionId}`,'s');
+    // Keep-alive
+    setInterval(()=>{ if(ws&&ws.readyState===1) ws.send('ping'); }, 25000);
+  };
+
+  ws.onmessage = (ev) => {
+    try { handleWsFrame(JSON.parse(ev.data)); } catch {}
+  };
+
+  ws.onclose = () => {
+    setDot('ws','off','Disconnected');
+    addLog('WS disconnected','w');
+  };
+
+  ws.onerror = () => {
+    setDot('ws','e','Error');
+    addLog('WS connection error','e');
+  };
+}
+
+function handleWsFrame(f) {
+  switch(f.type) {
+    case 'connected':
+      addLog(`WS: ${f.message}`,'i');
+      break;
+    case 'status':
+      addLog(`[STATUS] ${f.status}${f.detail?': '+f.detail:''}`,'i');
+      document.getElementById('s-status').textContent = f.status;
+      setPhase(f.status.toLowerCase().replace('_',''));
+      break;
+    case 'path_ready':
+      addLog(`[PATH] ${f.algorithm} — ${f.waypoint_count} waypoints, ~${Math.round(f.distance_m)}m`,'s');
+      document.getElementById('algo-badge').className='badge b-plan';
+      document.getElementById('algo-badge').textContent=f.algorithm;
+      document.getElementById('s-wpts').textContent=f.waypoint_count;
+      document.getElementById('s-dist').textContent=Math.round(f.distance_m);
+      break;
+    case 'telemetry':
+      document.getElementById('tele-step').textContent   = f.step;
+      document.getElementById('tele-lat').textContent    = f.lat.toFixed(4);
+      document.getElementById('tele-lon').textContent    = f.lon.toFixed(4);
+      document.getElementById('tele-elev').textContent   = f.elevation_m;
+      document.getElementById('tele-energy').textContent = f.energy_wh.toFixed(3);
+      document.getElementById('tele-dist').textContent   = f.cumulative_distance_m.toFixed(1);
+      document.getElementById('tele-cost').textContent   = f.cost.toFixed(3);
+      break;
+    case 'completed':
+      addLog(`[COMPLETE] Mission ${f.mission_id} done!`,'s');
+      setPhase('success');
+      if(f.summary) populateSummary(f.summary);
+      break;
+    case 'error':
+      addLog(`[ERROR] ${f.message}`,'e');
+      setPhase('failed');
+      break;
+  }
+}
+
+function populateSummary(s) {
+  document.getElementById('s-dist').textContent   = Math.round(s.total_distance_m||0);
+  document.getElementById('s-energy').textContent = (s.total_energy_wh||0).toFixed(1);
+  document.getElementById('s-risk').textContent   = (s.risk_score||0).toFixed(2);
+  document.getElementById('s-slope').textContent  = (s.max_slope_deg||0).toFixed(1);
+  document.getElementById('s-wpts').textContent   = s.waypoints||'—';
+}
+
+// ═══════════════════════════════════════════════════════════════════════════════
+// TERRAIN SIMULATION (canvas)
+// ═══════════════════════════════════════════════════════════════════════════════
+
+function genTerrain() {
+  grid=[];
+  const p1=rnd(4,9),p2=rnd(10,18),p3=rnd(20,35),p4=rnd(35,60);
+  const o1=rnd(0,6.28),o2=rnd(0,6.28),o3=rnd(0,6.28);
+  for(let r=0;r<ROWS;r++){
+    grid[r]=[];
+    for(let c=0;c<COLS;c++){
+      const x=c/COLS,y=r/ROWS;
+      const e=0.5+0.22*Math.sin(x*p1+o1)*Math.cos(y*p1*0.7+o2)
+        +0.14*Math.sin(x*p2+y*p2*0.8+o3)
+        +0.07*Math.cos(x*p3+2.1)*Math.sin(y*p3*0.9)
+        +0.04*Math.sin(x*p4+y*p4+1.5);
+      grid[r][c]={elev:clamp(e,0,1),crater:false,hidden:false,mineral:0,slope:0,cost:1,rev:false,minRev:false,origCost:1};
+    }
+  }
+  for(let r=1;r<ROWS-1;r++){
+    for(let c=1;c<COLS-1;c++){
+      const dh_r=(grid[r+1][c].elev-grid[r-1][c].elev)/2;
+      const dh_c=(grid[r][c+1].elev-grid[r][c-1].elev)/2;
+      grid[r][c].slope=Math.sqrt(dh_r*dh_r+dh_c*dh_c)*6;
+    }
+  }
+  // Known craters
+  for(const {r,c,rad} of [
+    {r:18,c:18,rad:5},{r:40,c:28,rad:4},{r:12,c:48,rad:6},{r:50,c:50,rad:5},
+    {r:28,c:68,rad:4},{r:48,c:78,rad:5},{r:10,c:38,rad:3},{r:55,c:22,rad:4},
+    {r:42,c:72,rad:3},{r:22,c:88,rad:5},{r:58,c:60,rad:4},{r:6,c:62,rad:3},
+    {r:35,c:42,rad:4},{r:60,c:38,rad:3}
+  ]) markCrater(r,c,rad,false);
+  // Hidden craters
+  for(const {r,c,rad} of [
+    {r:32,c:22,rad:2},{r:33,c:40,rad:2},{r:31,c:56,rad:2},
+    {r:32,c:73,rad:2},{r:33,c:84,rad:1},{r:30,c:50,rad:1},{r:34,c:64,rad:1}
+  ]) markCrater(r,c,rad,true);
+  // Mineral deposits
+  for(const {r,c,v,rad} of [
+    {r:22,c:35,v:0.9,rad:5},{r:44,c:58,v:0.85,rad:4},{r:14,c:72,v:0.8,rad:3},
+    {r:52,c:82,v:0.9,rad:4},{r:38,c:15,v:0.7,rad:3},{r:10,c:90,v:0.95,rad:4},
+    {r:8,c:28,v:0.75,rad:3},{r:58,c:44,v:0.8,rad:3},{r:30,c:92,v:0.85,rad:4}
+  ]){
+    for(let dr=-rad;dr<=rad;dr++) for(let dc=-rad;dc<=rad;dc++){
+      const nr=r+dr,nc=c+dc;
+      if(nr<0||nr>=ROWS||nc<0||nc>=COLS) continue;
+      const d=Math.sqrt(dr*dr+dc*dc);
+      if(d<=rad) grid[nr][nc].mineral=Math.max(grid[nr][nc].mineral,v*(1-d/rad*0.4));
+    }
+  }
+  for(let r=0;r<ROWS;r++) for(let c=0;c<COLS;c++){
+    const cl=grid[r][c];
+    if(!cl.crater&&!cl.hidden) cl.cost=Math.max(1,1+cl.slope*18-cl.mineral*0.4);
+    cl.origCost=cl.cost;
+  }
+  revealZone(startP.r,startP.c,6,false);
+  revealZone(goalP.r,goalP.c,4,false);
+  terrainCache=null;
+}
+
+function markCrater(r,c,rad,hidden){
+  for(let dr=-(rad+1);dr<=rad+1;dr++) for(let dc=-(rad+1);dc<=rad+1;dc++){
+    const nr=r+dr,nc=c+dc;
+    if(nr<0||nr>=ROWS||nc<0||nc>=COLS) continue;
+    if(Math.sqrt(dr*dr+dc*dc)<=rad){
+      if(hidden){grid[nr][nc].hidden=true;}
+      else{grid[nr][nc].crater=true;grid[nr][nc].cost=9999;grid[nr][nc].origCost=9999;}
+    }
+  }
+}
+
+function revealZone(r,c,rad,triggerReplan){
+  let newObs=false;
+  for(let dr=-rad;dr<=rad;dr++) for(let dc=-rad;dc<=rad;dc++){
+    const nr=r+dr,nc=c+dc;
+    if(nr<0||nr>=ROWS||nc<0||nc>=COLS||Math.sqrt(dr*dr+dc*dc)>rad) continue;
+    grid[nr][nc].rev=true;
+    if(grid[nr][nc].hidden&&grid[nr][nc].cost<9000){
+      grid[nr][nc].cost=9999; stats.obs++;
+      terrainCache=null;
+      addLog(`LiDAR A3: obstacle detected at (${nr},${nc})`,'w');
+      setDot('lidar','w','RPLiDAR A3 — obstacle!');
+      newObs=true;
+    }
+    if(grid[nr][nc].mineral>0.5&&!grid[nr][nc].minRev){
+      grid[nr][nc].minRev=true; stats.min++;
+      addLog(`Mineral sample: ${(grid[nr][nc].mineral*100).toFixed(0)}% at (${nr},${nc})`,'s');
+    }
+  }
+  if(newObs&&triggerReplan) trigReplan();
+}
+
+// ── A* ────────────────────────────────────────────────────────────────────────
+class MinHeap {
+  constructor(){this.h=[];}
+  push(p,v){this.h.push([p,v]);this._up(this.h.length-1);}
+  pop(){if(this.h.length===1)return this.h.pop();const t=this.h[0];this.h[0]=this.h.pop();this._down(0);return t;}
+  _up(i){while(i>0){const p=(i-1)>>1;if(this.h[p][0]<=this.h[i][0])break;[this.h[p],this.h[i]]=[this.h[i],this.h[p]];i=p;}}
+  _down(i){const n=this.h.length;for(;;){let m=i,l=2*i+1,r=2*i+2;if(l<n&&this.h[l][0]<this.h[m][0])m=l;if(r<n&&this.h[r][0]<this.h[m][0])m=r;if(m===i)break;[this.h[m],this.h[i]]=[this.h[i],this.h[m]];i=m;}}
+  get size(){return this.h.length;}
+}
+
+function astar(sr,sc,gr,gc){
+  const H=(r,c)=>Math.hypot(r-gr,c-gc)*1.05;
+  const g=new Map(),from=new Map(),pq=new MinHeap(),closed=new Set();
+  const sk=sr*COLS+sc; g.set(sk,0); pq.push(H(sr,sc),{r:sr,c:sc});
+  const D=[[-1,0,1],[1,0,1],[0,-1,1],[0,1,1],[-1,-1,1.414],[-1,1,1.414],[1,-1,1.414],[1,1,1.414]];
+  while(pq.size>0){
+    const[,cur]=pq.pop(); const ck=cur.r*COLS+cur.c;
+    if(closed.has(ck))continue; closed.add(ck);
+    if(cur.r===gr&&cur.c===gc){
+      const p=[];let k=ck;
+      while(from.has(k)){p.unshift({r:Math.floor(k/COLS),c:k%COLS});k=from.get(k);}
+      p.unshift({r:sr,c:sc}); return p;
+    }
+    for(const[dr,dc,w]of D){
+      const nr=cur.r+dr,nc=cur.c+dc;
+      if(nr<0||nr>=ROWS||nc<0||nc>=COLS)continue;
+      const cl=grid[nr][nc]; if(cl.cost>=9000)continue;
+      const nk=nr*COLS+nc; if(closed.has(nk))continue;
+      const tg=(g.get(ck)||0)+w*(1+cl.cost*0.09);
+      if(tg<(g.get(nk)||Infinity)){
+        g.set(nk,tg); from.set(nk,ck);
+        pq.push(tg+H(nr,nc),{r:nr,c:nc});
+      }
+    }
+  }
+  return null;
+}
+
+// ── RRT* ─────────────────────────────────────────────────────────────────────
+function rrtStar(sr,sc,gr,gc){
+  const nodes=[{r:sr,c:sc,parent:-1,cost:0}];
+  const STEP=5,NR=8,GTH=4;
+  function losOK(r1,c1,r2,c2){
+    const s=Math.max(Math.abs(r2-r1),Math.abs(c2-c1),1);
+    for(let i=0;i<=s;i++){
+      const r=Math.round(r1+(r2-r1)*i/s),c=Math.round(c1+(c2-c1)*i/s);
+      if(r<0||r>=ROWS||c<0||c>=COLS||grid[r][c].cost>=9000)return false;
+    }
+    return true;
+  }
+  for(let it=0;it<5000;it++){
+    let tr,tc;
+    if(Math.random()<0.12){tr=gr;tc=gc;}
+    else{tr=ri(0,ROWS-1);tc=ri(0,COLS-1);}
+    let ni=0,md=Infinity;
+    for(let i=0;i<nodes.length;i++){
+      const d=Math.hypot(nodes[i].r-tr,nodes[i].c-tc);
+      if(d<md){md=d;ni=i;}
+    }
+    let nr,nc;
+    if(md<=STEP){nr=tr;nc=tc;}
+    else{
+      const a=Math.atan2(tr-nodes[ni].r,tc-nodes[ni].c);
+      nr=Math.round(nodes[ni].r+STEP*Math.sin(a));
+      nc=Math.round(nodes[ni].c+STEP*Math.cos(a));
+    }
+    if(nr<0||nr>=ROWS||nc<0||nc>=COLS||grid[nr][nc].cost>=9000)continue;
+    if(!losOK(nodes[ni].r,nodes[ni].c,nr,nc))continue;
+    let bp=ni,bc=nodes[ni].cost+Math.hypot(nr-nodes[ni].r,nc-nodes[ni].c);
+    for(let i=0;i<nodes.length;i++){
+      const d=Math.hypot(nodes[i].r-nr,nodes[i].c-nc);
+      if(d<=NR&&losOK(nodes[i].r,nodes[i].c,nr,nc)){
+        const cc=nodes[i].cost+d;
+        if(cc<bc){bc=cc;bp=i;}
+      }
+    }
+    const ni2=nodes.length;
+    nodes.push({r:nr,c:nc,parent:bp,cost:bc});
+    if(Math.hypot(nr-gr,nc-gc)<=GTH){
+      const p=[];let idx=ni2;
+      while(idx>=0){p.unshift({r:nodes[idx].r,c:nodes[idx].c});idx=nodes[idx].parent;}
+      p.push({r:gr,c:gc}); rrtNodes=nodes; return p;
+    }
+  }
+  rrtNodes=nodes; return null;
+}
+
+// ── Replanning ────────────────────────────────────────────────────────────────
+function pathClear(){
+  if(!path)return false;
+  for(let i=pathIdx;i<path.length;i++){
+    if(grid[path[i].r][path[i].c].cost>=9000)return false;
+  }
+  return true;
+}
+
+function trigReplan(){
+  if(!path||phase==='rrt'||phase==='replanning')return;
+  moving=false; setPhase('replanning');
+  setDot('dstar','w','D* Lite — replanning…');
+  stats.rep++; updateStats();
+  addLog(`D* Lite triggered (attempt ${failCount+1})`,'w');
+  setTimeout(()=>{
+    const cur=path[Math.min(pathIdx,path.length-1)];
+    const np=astar(cur.r,cur.c,goalP.r,goalP.c);
+    if(np&&np.length>1){
+      replanPath=np; path=np; pathIdx=0; rFrac=0; failCount=0;
+      setDot('dstar','on','D* Lite — replan OK');
+      setPhase('moving'); moving=true;
+      addLog(`D* Lite: new path (${np.length} pts)`,'i');
+      document.getElementById('algo-badge').className='badge b-warn';
+      document.getElementById('algo-badge').textContent='D* Lite';
+    } else {
+      failCount++;
+      setDot('dstar','e','D* Lite — failed');
+      addLog('D* Lite: no path found','e');
+      if(failCount>=3) trigRRT(cur.r,cur.c);
+      else { setPhase('failed'); addLog('Manual intervention required','e'); }
+    }
+    updateStats();
+  },350);
+}
+
+function trigRRT(sr,sc){
+  setPhase('rrt');
+  setDot('rrt','w','RRT* — searching…');
+  document.getElementById('algo-badge').className='badge b-err';
+  document.getElementById('algo-badge').textContent='RRT* EMERGENCY';
+  stats.rrt++; updateStats();
+  addLog('RRT*: emergency global replan (sampling space…)','e');
+  rrtNodes=null;
+  setTimeout(()=>{
+    const np=rrtStar(sr,sc,goalP.r,goalP.c);
+    if(np){
+      path=np; replanPath=np; pathIdx=0; rFrac=0; failCount=0;
+      setDot('rrt','on','RRT* — path found');
+      setPhase('moving'); moving=true;
+      addLog(`RRT*: escape path (${np.length} waypoints)`,'s');
+    } else {
+      setDot('rrt','e','RRT* — failed');
+      setPhase('failed');
+      addLog('RRT*: no viable path — mission abort','e');
+    }
+    updateStats();
+  },600);
+}
+
+// ═══════════════════════════════════════════════════════════════════════════════
+// Canvas render
+// ═══════════════════════════════════════════════════════════════════════════════
+let canvas, ctx;
+
+function buildTerrainCache(){
+  const off=document.createElement('canvas');
+  off.width=COLS*CELL; off.height=ROWS*CELL;
+  const oc=off.getContext('2d');
+  for(let r=0;r<ROWS;r++) for(let c=0;c<COLS;c++){
+    const cl=grid[r][c],x=c*CELL,y=r*CELL;
+    if(layers.fog&&!cl.rev){oc.fillStyle='#050810';oc.fillRect(x,y,CELL,CELL);continue;}
+    if(layers.terrain){
+      const g=Math.floor(20+cl.elev*45);
+      oc.fillStyle=`rgb(${g},${g},${Math.min(255,g+10)})`;oc.fillRect(x,y,CELL,CELL);
+    } else {oc.fillStyle='#101520';oc.fillRect(x,y,CELL,CELL);}
+    if(layers.crater&&cl.crater){oc.fillStyle='#06081a';oc.fillRect(x,y,CELL,CELL);}
+    if(cl.hidden&&cl.rev){oc.fillStyle='#cc2200';oc.fillRect(x,y,CELL,CELL);}
+    if(layers.mineral&&cl.mineral>0.15){
+      oc.fillStyle=`rgba(30,90,220,${Math.min(0.7,cl.mineral*0.8)})`;oc.fillRect(x,y,CELL,CELL);}
+    if(layers.slope&&cl.slope>0.08&&!cl.crater){
+      oc.fillStyle=`rgba(200,88,0,${Math.min(0.55,cl.slope*0.9)})`;oc.fillRect(x,y,CELL,CELL);}
+  }
+  return off;
+}
+
+function getRoverPx(){
+  if(!path||path.length===0) return{x:startP.c*CELL+CELL/2,y:startP.r*CELL+CELL/2,a:0};
+  if(pathIdx>=path.length-1){const l=path[path.length-1];return{x:l.c*CELL+CELL/2,y:l.r*CELL+CELL/2,a:0};}
+  const c1=path[pathIdx],c2=path[pathIdx+1];
+  return{
+    x:(c1.c+(c2.c-c1.c)*rFrac)*CELL+CELL/2,
+    y:(c1.r+(c2.r-c1.r)*rFrac)*CELL+CELL/2,
+    a:Math.atan2(c2.r-c1.r,c2.c-c1.c)
+  };
+}
+
+function render(){
+  if(!canvas)return;
+  // Resize canvas to container
+  const wrap = document.getElementById('map-wrap');
+  canvas.width = wrap.clientWidth;
+  canvas.height = wrap.clientHeight;
+
+  if(!terrainCache) terrainCache=buildTerrainCache();
+
+  // Scale to fit
+  const scaleX=canvas.width/(COLS*CELL), scaleY=canvas.height/(ROWS*CELL);
+  const scale=Math.min(scaleX,scaleY);
+  const offX=(canvas.width-COLS*CELL*scale)/2;
+  const offY=(canvas.height-ROWS*CELL*scale)/2;
+
+  ctx.clearRect(0,0,canvas.width,canvas.height);
+  ctx.save();
+  ctx.translate(offX,offY);
+  ctx.scale(scale,scale);
+
+  ctx.drawImage(terrainCache,0,0);
+
+  // RRT* tree
+  if(rrtNodes&&rrtNodes.length>0&&phase==='rrt'){
+    ctx.strokeStyle='rgba(255,60,0,0.2)'; ctx.lineWidth=0.6;
+    for(const n of rrtNodes){
+      if(n.parent>=0){
+        const p=rrtNodes[n.parent];
+        ctx.beginPath();ctx.moveTo(p.c*CELL+CELL/2,p.r*CELL+CELL/2);
+        ctx.lineTo(n.c*CELL+CELL/2,n.r*CELL+CELL/2);ctx.stroke();
+      }
+    }
+  }
+
+  // Path
+  if(layers.path&&path&&path.length>1){
+    if(pathIdx>1){
+      ctx.beginPath();ctx.strokeStyle='rgba(0,150,60,0.4)';ctx.lineWidth=2;
+      ctx.moveTo(path[0].c*CELL+CELL/2,path[0].r*CELL+CELL/2);
+      for(let i=1;i<=pathIdx&&i<path.length;i++) ctx.lineTo(path[i].c*CELL+CELL/2,path[i].r*CELL+CELL/2);
+      ctx.stroke();
+    }
+    const pc=phase==='rrt'?'#ff3d3d':phase==='replanning'?'#ff9100':'#00e676';
+    ctx.beginPath();ctx.strokeStyle=pc;ctx.lineWidth=2.5;ctx.setLineDash([5,3]);
+    const sp=path[Math.min(pathIdx,path.length-1)];
+    ctx.moveTo(sp.c*CELL+CELL/2,sp.r*CELL+CELL/2);
+    for(let i=pathIdx+1;i<path.length;i++) ctx.lineTo(path[i].c*CELL+CELL/2,path[i].r*CELL+CELL/2);
+    ctx.stroke(); ctx.setLineDash([]);
+    const gp=path[path.length-1];
+    ctx.beginPath();ctx.arc(gp.c*CELL+CELL/2,gp.r*CELL+CELL/2,7,0,Math.PI*2);
+    ctx.strokeStyle='#00e676';ctx.lineWidth=2;ctx.stroke();
+    ctx.fillStyle='rgba(0,230,118,.3)';ctx.fill();
+    ctx.font=`${CELL*1.2}px monospace`;ctx.fillStyle='#00e676';
+    ctx.fillText('GOAL',gp.c*CELL-6,gp.r*CELL-10);
+  }
+
+  // Start marker
+  ctx.beginPath();ctx.arc(startP.c*CELL+CELL/2,startP.r*CELL+CELL/2,5,0,Math.PI*2);
+  ctx.strokeStyle='#aaa';ctx.lineWidth=1.5;ctx.stroke();
+  ctx.font=`${CELL*1.1}px monospace`;ctx.fillStyle='#aaa';
+  ctx.fillText('START',startP.c*CELL-8,startP.r*CELL-8);
+
+  // LiDAR ring
+  if(layers['lidar-r']&&moving&&path&&pathIdx<path.length){
+    const{x,y}=getRoverPx();
+    const range=LR_PX*CELL;
+    ctx.beginPath();ctx.arc(x,y,range,0,Math.PI*2);
+    ctx.strokeStyle='rgba(0,200,220,0.2)';ctx.lineWidth=1;ctx.stroke();
+    ctx.fillStyle='rgba(0,200,220,0.04)';ctx.fill();
+    const sa=(Date.now()/600)%(Math.PI*2);
+    ctx.beginPath();ctx.moveTo(x,y);
+    ctx.lineTo(x+Math.cos(sa)*range,y+Math.sin(sa)*range);
+    ctx.strokeStyle='rgba(0,200,220,0.55)';ctx.lineWidth=1.5;ctx.stroke();
+  }
+
+  // Rover sprite
+  if(path&&path.length>0){
+    const{x,y,a}=getRoverPx();
+    ctx.save();ctx.translate(x,y);ctx.rotate(a);
+    ctx.beginPath();ctx.moveTo(10,0);ctx.lineTo(-7,-5);ctx.lineTo(-7,5);ctx.closePath();
+    ctx.fillStyle='#fff';ctx.fill();
+    ctx.strokeStyle='rgba(0,200,255,.9)';ctx.lineWidth=1.5;ctx.stroke();
+    ctx.restore();
+  }
+
+  ctx.restore();
+}
+
+// ═══════════════════════════════════════════════════════════════════════════════
+// Main animation loop
+// ═══════════════════════════════════════════════════════════════════════════════
+function loop(ts){
+  requestAnimationFrame(loop);
+  const dt=Math.min((ts-(lastTs||ts))/1000,0.05);
+  lastTs=ts;
+
+  if(moving&&!paused&&path&&phase==='moving'){
+    mTime+=dt;
+    const spd=speed*0.012;
+    rFrac+=spd*dt*60;
+    if(rFrac>=1){
+      rFrac-=1; pathIdx++;
+      stats.dist+=CELL_M; stats.eng+=CELL_M*0.08;
+      if(pathIdx<path.length){
+        const cur=path[pathIdx];
+        revealZone(cur.r,cur.c,LR_PX,false);
+        terrainCache=null;
+        if(!pathClear()){ addLog('Obstacle on planned path!','w'); trigReplan(); }
+      }
+      if(pathIdx>=path.length-1){
+        setPhase('success'); moving=false;
+        setDot('lidar','on','RPLiDAR A3 — scan complete');
+        addLog(`MISSION COMPLETE — ${Math.round(stats.dist)}m, ${stats.rep} replans, ${stats.min} mineral samples`,'s');
+      }
+      updateStats();
+    }
+  }
+  render();
+}
+
+// ═══════════════════════════════════════════════════════════════════════════════
+// Tab system
+// ═══════════════════════════════════════════════════════════════════════════════
+document.querySelectorAll('.tab').forEach(t=>{
+  t.addEventListener('click',()=>{
+    document.querySelectorAll('.tab').forEach(x=>x.classList.remove('active'));
+    document.querySelectorAll('.pane').forEach(x=>x.classList.remove('active'));
+    t.classList.add('active');
+    const id='pane-'+t.dataset.tab;
+    document.getElementById(id).classList.add('active');
+    if(t.dataset.tab==='map') { terrainCache=null; }
+    if(t.dataset.tab==='algo') buildAlgoCards();
+    if(t.dataset.tab==='mineral') buildMineralCards();
+  });
+});
+
+// ═══════════════════════════════════════════════════════════════════════════════
+// Layer toggles
+// ═══════════════════════════════════════════════════════════════════════════════
+['terrain','crater','mineral','slope','path','lidar-r','fog'].forEach(k=>{
+  const el=document.getElementById('l-'+k);
+  if(el) el.addEventListener('change',()=>{
+    layers[k]=el.checked;
+    if(['terrain','crater','mineral','slope','fog'].includes(k)) terrainCache=null;
+  });
+});
+
+// Speed slider
+document.getElementById('spd').addEventListener('input',e=>{
+  speed=parseInt(e.target.value);
+  document.getElementById('spd-val').textContent=speed+'×';
+});
+
+// ═══════════════════════════════════════════════════════════════════════════════
+// Map controls
+// ═══════════════════════════════════════════════════════════════════════════════
+function fullReset(newMap){
+  path=null;replanPath=null;rrtNodes=null;pathIdx=0;rFrac=0;
+  moving=false;paused=false;failCount=0;mTime=0;lastTs=0;phase='idle';
+  stats={dist:0,rep:0,obs:0,min:0,rrt:0,eng:0};
+  setPhase('idle');
+  ['astar','hastar','dstar','rrt','unet','lidar'].forEach(id=>{
+    setDot(id,id==='astar'?'idle':'off',null);
+  });
+  document.getElementById('algo-badge').className='badge b-idle';
+  document.getElementById('algo-badge').textContent='NO MISSION';
+  terrainCache=null;
+  if(newMap) genTerrain();
+  else {
+    for(let r=0;r<ROWS;r++) for(let c=0;c<COLS;c++){
+      const cl=grid[r][c];
+      cl.rev=false;cl.minRev=false;
+      if(cl.hidden&&!cl.crater) cl.cost=cl.origCost;
+    }
+    revealZone(startP.r,startP.c,6,false);
+    revealZone(goalP.r,goalP.c,4,false);
+  }
+  updateStats();
+}
+
+function attachMapControls(prefix){
+  document.getElementById(prefix+'-newmap')?.addEventListener('click',()=>{
+    fullReset(true);addLog('New terrain generated from Chandrayaan-2 DEM','i');
+  });
+  document.getElementById(prefix+'-plan')?.addEventListener('click',()=>{
+    if(phase==='moving'||phase==='rrt')return;
+    setPhase('planning');
+    setDot('astar','w','A* — computing…');
+    setDot('unet','w','U-Net cost map…');
+    addLog('A* path planning initiated…','i');
+    setTimeout(()=>{
+      const np=astar(startP.r,startP.c,goalP.r,goalP.c);
+      if(np){
+        path=np;pathIdx=0;rFrac=0;replanPath=null;
+        setDot('astar','on','A* — path ready');
+        setDot('unet','on','U-Net active');
+        document.getElementById('algo-badge').className='badge b-plan';
+        document.getElementById('algo-badge').textContent='A* COMPLETE';
+        setPhase('idle');
+        addLog(`A* success: ${np.length} waypoints, ~${Math.round(np.length*CELL_M)}m`,'s');
+        document.getElementById('s-wpts').textContent=np.length;
+        document.getElementById('s-dist').textContent=Math.round(np.length*CELL_M);
+        updateStats();
+      } else {
+        setDot('astar','e','A* — no path');
+        setDot('unet','off','U-Net idle');
+        setPhase('failed');
+        addLog('A* failed — try RRT* manually or generate new map','e');
+      }
+    },450);
+  });
+  document.getElementById(prefix+'-start')?.addEventListener('click',()=>{
+    if(!path||phase==='moving')return;
+    setPhase('moving');
+    setDot('lidar','on','RPLiDAR A3 — scanning');
+    setDot('dstar','idle','D* Lite — monitoring');
+    moving=true;paused=false;
+    addLog('Rover traversal started','i');
+  });
+  document.getElementById(prefix+'-pause')?.addEventListener('click',()=>{
+    paused=!paused;moving=!paused&&phase==='moving';
+    const el=document.getElementById(prefix+'-pause');
+    if(el) el.textContent=paused?'Resume ▶':'Pause ⏸';
+    addLog(paused?'Mission paused':'Mission resumed','i');
+  });
+  document.getElementById(prefix+'-reset')?.addEventListener('click',()=>{
+    fullReset(false);addLog('Mission reset — terrain preserved','i');
+  });
+}
+
+attachMapControls('btn');
+attachMapControls('rc');
+
+// ═══════════════════════════════════════════════════════════════════════════════
+// Mission Setup tab
+// ═══════════════════════════════════════════════════════════════════════════════
+document.getElementById('mt-latlon').addEventListener('click',()=>{
+  document.getElementById('mt-latlon').classList.add('on');
+  document.getElementById('mt-pixel').classList.remove('on');
+  document.getElementById('latlon-fields').style.display='';
+  document.getElementById('pixel-fields').style.display='none';
+});
+document.getElementById('mt-pixel').addEventListener('click',()=>{
+  document.getElementById('mt-pixel').classList.add('on');
+  document.getElementById('mt-latlon').classList.remove('on');
+  document.getElementById('pixel-fields').style.display='';
+  document.getElementById('latlon-fields').style.display='none';
+});
+
+document.getElementById('btn-create-mission').addEventListener('click', async()=>{
+  apiBase = document.getElementById('api-url').value.trim();
+  const isLatLon = document.getElementById('mt-latlon').classList.contains('on');
+  const useHeuristic = document.getElementById('opt-heuristic').checked;
+  const smoothPath   = document.getElementById('opt-smooth').checked;
+
+  let body;
+  if(isLatLon){
+    body = {
+      start: {lat:parseFloat(document.getElementById('start-lat').value), lon:parseFloat(document.getElementById('start-lon').value)},
+      goal:  {lat:parseFloat(document.getElementById('goal-lat').value),  lon:parseFloat(document.getElementById('goal-lon').value)},
+      use_heuristic: useHeuristic, smooth_path: smoothPath,
+    };
+  } else {
+    body = {
+      start_pixel: {x:parseInt(document.getElementById('start-px').value), y:parseInt(document.getElementById('start-py').value)},
+      goal_pixel:  {x:parseInt(document.getElementById('goal-px').value),  y:parseInt(document.getElementById('goal-py').value)},
+      vrt_file:    document.getElementById('vrt-path').value.trim(),
+      use_heuristic: useHeuristic, smooth_path: smoothPath,
+    };
+  }
+
+  addLog(`Creating mission via API…`,'i');
+  const resp = await apiPost('/mission/create', body);
+  if(resp){
+    activeMissionId = resp.mission_id;
+    document.getElementById('s-id').textContent = activeMissionId;
+    document.getElementById('s-status').textContent = resp.status;
+    const el = document.getElementById('mission-response');
+    el.style.display='';
+    el.textContent = JSON.stringify(resp, null, 2);
+    addLog(`Mission ${activeMissionId} created — pipeline running`,'s');
+    connectWS(activeMissionId);
+  }
+});
+
+document.getElementById('btn-poll').addEventListener('click', async()=>{
+  if(!activeMissionId){addLog('No active mission ID','w');return;}
+  const resp = await apiGet(`/mission/${activeMissionId}/status`);
+  if(resp){
+    document.getElementById('s-status').textContent = resp.status;
+    const el = document.getElementById('mission-response');
+    el.style.display='';
+    el.textContent = JSON.stringify(resp, null, 2);
+    if(resp.summary) populateSummary(resp.summary);
+    if(resp.mineral_report) populateMineralData(resp.mineral_report);
+    addLog(`Mission ${activeMissionId}: ${resp.status}`,'i');
+  }
+});
+
+document.getElementById('btn-list-missions').addEventListener('click', async()=>{
+  apiBase = document.getElementById('api-url').value.trim();
+  const list = await apiGet('/mission/?limit=20');
+  const el = document.getElementById('mission-list');
+  if(list&&list.length>0){
+    el.innerHTML = list.map(m=>`
+      <div style="display:flex;justify-content:space-between;padding:4px 0;border-bottom:1px solid var(--border);cursor:pointer"
+           onclick="document.getElementById('s-id').textContent=${m.mission_id};window.activeMissionId=${m.mission_id}">
+        <span style="color:var(--accent)">#${m.mission_id}</span>
+        <span style="color:var(--muted)">${m.start_lat.toFixed(2)},${m.start_lon.toFixed(2)} → ${m.goal_lat.toFixed(2)},${m.goal_lon.toFixed(2)}</span>
+        <span class="badge ${m.status==='COMPLETED'?'b-ok':m.status==='FAILED'?'b-err':'b-plan'}">${m.status}</span>
+      </div>`).join('');
+  } else {
+    el.innerHTML='<span style="color:var(--muted)">No missions found.</span>';
+  }
+});
+
+document.getElementById('btn-delete-mission').addEventListener('click', async()=>{
+  if(!activeMissionId){addLog('No active mission','w');return;}
+  if(!confirm(`Delete mission ${activeMissionId}?`))return;
+  const r = await apiDelete(`/mission/${activeMissionId}`);
+  if(r){ addLog(`Mission ${activeMissionId} deleted`,'w'); activeMissionId=null; document.getElementById('s-id').textContent='—'; }
+});
+
+// WS connect button
+document.getElementById('btn-ws-connect').addEventListener('click',()=>{
+  if(!activeMissionId){addLog('Set a mission ID first','w');return;}
+  connectWS(activeMissionId);
+});
+
+// ═══════════════════════════════════════════════════════════════════════════════
+// LiDAR tab
+// ═══════════════════════════════════════════════════════════════════════════════
+function parseLidarText(raw) {
+  const points = [];
+  for(const line of raw.split('\n')){
+    const tm=line.match(/theta[:\s]+([\d.]+)/i);
+    const dm=line.match(/dist[:\s]+([\d.]+)/i);
+    const qm=line.match(/q[:\s]+(\d+)/i);
+    if(tm&&dm){
+      points.push({theta:parseFloat(tm[1]),distance_m:parseFloat(dm[1])/1000,quality:qm?parseInt(qm[1]):47});
+    }
+  }
+  return points;
+}
+
+document.getElementById('btn-parse-scan').addEventListener('click', async()=>{
+  const raw = document.getElementById('lidar-raw').value;
+  const points = parseLidarText(raw);
+  if(!points.length){addLog('No valid scan points parsed','w');return;}
+  const body = {
+    mission_id: activeMissionId||1,
+    points,
+    rover_row: parseInt(document.getElementById('rover-row').value),
+    rover_col: parseInt(document.getElementById('rover-col').value),
+    pixels_per_metre: parseFloat(document.getElementById('ppm').value),
+  };
+  addLog(`Sending ${points.length} scan points to API…`,'i');
+  const resp = await apiPost('/lidar/scan/inject', body);
+  if(resp){
+    document.getElementById('scan-results').innerHTML =
+      `<b style="color:var(--green)">✓ ${resp.obstacles_found} obstacles detected</b><br><pre>${JSON.stringify(resp,null,2)}</pre>`;
+    addLog(`LiDAR: ${resp.obstacles_found} obstacles → ${resp.status}`,'s');
+    setDot('lidar','w',`RPLiDAR A3 — ${resp.obstacles_found} obstacles`);
+  }
+});
+
+document.getElementById('btn-inject-only').addEventListener('click', async()=>{
+  const raw = document.getElementById('lidar-raw').value;
+  const points = parseLidarText(raw);
+  if(!points.length){addLog('No valid scan points parsed','w');return;}
+  const body = {
+    mission_id: activeMissionId||1,
+    points,
+    rover_row: parseInt(document.getElementById('rover-row').value),
+    rover_col: parseInt(document.getElementById('rover-col').value),
+    pixels_per_metre: parseFloat(document.getElementById('ppm').value),
+  };
+  const resp = await apiPost('/lidar/scan/process', body);
+  if(resp){
+    document.getElementById('scan-results').innerHTML =
+      `<b style="color:var(--accent)">${resp.obstacles_found} obstacles processed (no replan)</b><br><pre>${JSON.stringify(resp,null,2)}</pre>`;
+  }
+});
+
+// Manual obstacles
+document.getElementById('btn-add-obs').addEventListener('click',()=>{
+  const obs={x:parseInt(document.getElementById('obs-x').value),
+             y:parseInt(document.getElementById('obs-y').value),
+             radius:parseInt(document.getElementById('obs-r').value)};
+  manualObstacles.push(obs);
+  const el=document.getElementById('obs-list');
+  el.innerHTML=manualObstacles.map((o,i)=>
+    `<span style="color:var(--text);margin-right:12px">obs${i+1}: (${o.x},${o.y}) r=${o.radius}</span>`).join('');
+  addLog(`Added obstacle at (${obs.x},${obs.y}) r=${obs.radius}`,'i');
+});
+
+document.getElementById('btn-clear-obs').addEventListener('click',()=>{
+  manualObstacles=[];
+  document.getElementById('obs-list').innerHTML='';
+});
+
+document.getElementById('btn-send-obstacles').addEventListener('click', async()=>{
+  if(!manualObstacles.length){addLog('No obstacles to send','w');return;}
+  const body={mission_id:activeMissionId||1,lidar_data:{obstacles:manualObstacles}};
+  const resp = await apiPost(`/mission/${activeMissionId||1}/replan`,body);
+  if(resp){
+    addLog(`Replan triggered: ${JSON.stringify(resp)}`,'s');
+    setDot('dstar','w','D* Lite — replanning…');
+    stats.rep++;updateStats();
+  }
+});
+
+// ═══════════════════════════════════════════════════════════════════════════════
+// Algorithm comparison cards
+// ═══════════════════════════════════════════════════════════════════════════════
+function buildAlgoCards(){
+  const algos = [
+    { name:'A*', color:'#00c8ff', role:'Global Initial Planner',
+      metrics:{Speed:'★★★★★',Optimality:'Guaranteed',Memory:'O(n)',Dynamic:'None',
+               Complexity:'O(n log n)','Compute':'2-5 sec'},
+      bar:{label:'Planning Speed',pct:95,col:'#00c8ff'},
+      desc:'Fast, deterministic. Used once at mission start.' },
+    { name:'Hybrid A*', color:'#00e676', role:'Kinematic-Aware Planner',
+      metrics:{Speed:'★★★☆☆',Optimality:'Near-optimal',Memory:'O(n)',Dynamic:'None',
+               Complexity:'O(n log n)','Compute':'5-12 sec'},
+      bar:{label:'Path Smoothness',pct:90,col:'#00e676'},
+      desc:'Respects rover turning radius. Fallback if A* path is poor.' },
+    { name:'D* Lite', color:'#ff9100', role:'Dynamic Replanner',
+      metrics:{Speed:'★★★★☆',Optimality:'Optimal',Memory:'O(n)',Dynamic:'1-5 Hz',
+               Complexity:'O(k log n)','Compute:'<'0.1 sec/update'},
+      bar:{label:'Replan Speed',pct:88,col:'#ff9100'},
+      desc:'Incremental repair. Only updates affected path segments.' },
+    { name:'RRT*', color:'#ff3d3d', role:'Emergency Backup',
+      metrics:{Speed:'★★☆☆☆',Optimality:'Asymptotically optimal',Memory:'O(n)',Dynamic:'Once',
+               Complexity:'O(n log n)','Compute':'5-30 sec'},
+      bar:{label:'Robustness',pct:99,col:'#ff3d3d'},
+      desc:'Sampling-based. Finds narrow escapes. Triggered on D* failure×3.' },
+  ];
+
+  document.getElementById('algo-grid').innerHTML = algos.map(a=>`
+    <div class="algo-card">
+      <div class="algo-name" style="color:${a.color}">${a.name}</div>
+      <div style="font-size:9px;color:var(--muted);margin-bottom:8px">${a.role}</div>
+      ${Object.entries(a.metrics).map(([k,v])=>`
+        <div class="algo-metric"><span class="k">${k}</span><span class="v">${v}</span></div>`).join('')}
+      <div class="bar-row">
+        <div class="bar-label">${a.bar.label}</div>
+        <div class="bar-track"><div class="bar-fill" style="width:${a.bar.pct}%;background:${a.bar.col}"></div></div>
+      </div>
+      <div style="margin-top:8px;font-size:9px;color:var(--muted);line-height:1.5">${a.desc}</div>
+    </div>`).join('');
+}
+
+// ═══════════════════════════════════════════════════════════════════════════════
+// Mineral cards
+// ═══════════════════════════════════════════════════════════════════════════════
+let mineralData = null;
+
+function populateMineralData(report){
+  mineralData = report;
+  if(document.getElementById('pane-mineral').classList.contains('active')) buildMineralCards();
+}
+
+function buildMineralCards(){
+  const grid = document.getElementById('mineral-grid');
+  if(!mineralData){
+    grid.innerHTML='<div style="color:var(--muted);font-size:10px;grid-column:1/-1">No mineral data. Complete a mission first.</div>';
+    return;
+  }
+  const minerals = [
+    { name:'Hydrogen (H)', key:'hydrogen', unit:'ppm', color:'#00c8ff', note:'Water ice indicator (IIRS 2.8-3.0 µm)', threshold:50 },
+    { name:'Iron (Fe)', key:'iron', unit:'wt%', color:'#ff9100', note:'Ilmenite, pyroxene — mare basalt', threshold:5 },
+    { name:'Thorium (Th)', key:'thorium', unit:'ppm', color:'#00e676', note:'KREEP terrain enrichment', threshold:1 },
+  ];
+  grid.innerHTML = minerals.map(m=>{
+    const avg = mineralData[m.key+'_avg']??0;
+    const exp = mineralData[m.key+'_exposure_pct']??0;
+    return `
+    <div class="mineral-card">
+      <div class="mineral-name" style="color:${m.color}">${m.name}</div>
+      <div class="mineral-avg" style="color:${m.color}">${avg.toFixed(2)}</div>
+      <div class="mineral-unit">${m.unit} avg along path</div>
+      <div style="font-size:9px;color:var(--muted);margin-bottom:6px">${m.note}</div>
+      <div style="font-size:10px">Exposure: <b style="color:${m.color}">${exp.toFixed(1)}%</b> of path above detection threshold</div>
+      <div class="exposure-bar"><div class="exposure-fill" style="width:${Math.min(100,exp)}%;background:${m.color}"></div></div>
+    </div>`;
+  }).join('');
+
+  // Summary table
+  document.getElementById('mineral-table').innerHTML = `
+    <div style="background:var(--panel);border:1px solid var(--border);border-radius:5px;padding:10px">
+      <div style="color:var(--accent);font-size:10px;letter-spacing:.06em;text-transform:uppercase;margin-bottom:8px">
+        Chandrayaan-2 CLASS Element Map Reference (85°S–90°S)
+      </div>
+      <div class="info-row"><span class="k">Aluminium (Al) range</span><span class="v">18–24 wt% — Highland anorthosite</span></div>
+      <div class="info-row"><span class="k">Iron (Fe) range</span><span class="v">8–16 wt% — Mixed terrain</span></div>
+      <div class="info-row"><span class="k">Magnesium (Mg) range</span><span class="v">6–14 wt% — Low mafic</span></div>
+      <div class="info-row"><span class="k">Silicon (Si) range</span><span class="v">23–25 wt% — Silica-rich</span></div>
+      <div class="info-row"><span class="k">Path samples</span><span class="v">${mineralData.n_samples||'—'}</span></div>
+    </div>`;
+}
+
+// ═══════════════════════════════════════════════════════════════════════════════
+// Log clear
+// ═══════════════════════════════════════════════════════════════════════════════
+document.getElementById('btn-clear-log').addEventListener('click',()=>{
+  document.getElementById('logbox').innerHTML='';
+  document.getElementById('minilog').innerHTML='';
+});
+
+// ═══════════════════════════════════════════════════════════════════════════════
+// Init
+// ═══════════════════════════════════════════════════════════════════════════════
+window.addEventListener('load',()=>{
+  canvas = document.getElementById('mapCanvas');
+  ctx = canvas.getContext('2d');
+
+  genTerrain();
+  buildAlgoCards();
+  buildMineralCards();
+  updateStats();
+
+  addLog('System initialised — Chandrayaan-2 South Pole (87°S)','i');
+  addLog('RPLiDAR A3: 100m range, 16000 pts/scan, 15 Hz','i');
+  addLog('U-Net traversability model ready (heuristic mode)','i');
+  addLog('7 hidden obstacles placed — revealed by LiDAR during traverse','i');
+  addLog('Use [Plan A*] → [Start ▶] to begin simulation','i');
+  addLog('Use Mission Setup tab to connect real backend API','i');
+
+  requestAnimationFrame(loop);
+});
+</script>
+</body>
+</html>
