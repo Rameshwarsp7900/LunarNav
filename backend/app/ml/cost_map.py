@@ -203,16 +203,19 @@ def _burn_craters_into_cost(
 
         pr, pc = latlon_to_pixel(patch, lat, lon)
 
-        # Draw filled disc
+        # ⚡ Optimization: Vectorized crater burning
+        # Before: Nested for-loops O(R^2) per crater
+        # After: NumPy broadcasting and boolean indexing
+        # Expected improvement: Significant speedup for large craters and many-crater patches.
         r_min = max(0, pr - radius_px)
         r_max = min(rows - 1, pr + radius_px)
         c_min = max(0, pc - radius_px)
         c_max = min(cols_count - 1, pc + radius_px)
 
-        for ri in range(r_min, r_max + 1):
-            for ci in range(c_min, c_max + 1):
-                if (ri - pr)**2 + (ci - pc)**2 <= radius_px**2:
-                    cost_map[ri, ci] = max(cost_map[ri, ci], cost_weight)
+        rr, cc = np.ogrid[r_min : r_max + 1, c_min : c_max + 1]
+        mask = (rr - pr)**2 + (cc - pc)**2 <= radius_px**2
+        region = cost_map[r_min : r_max + 1, c_min : c_max + 1]
+        region[mask] = np.maximum(region[mask], cost_weight)
 
     logger.info("Burned %d craters into cost map.", len(local))
     return cost_map
