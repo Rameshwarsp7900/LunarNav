@@ -10,6 +10,7 @@ from fastapi.middleware.cors import CORSMiddleware
 from fastapi.staticfiles import StaticFiles
 from fastapi.responses import FileResponse
 
+from sqlalchemy import text
 from app.database import engine, Base
 from app.routers import mission, ws, lidar
 from app.config import get_settings
@@ -17,11 +18,22 @@ from app.config import get_settings
 settings = get_settings()
 
 
+async def init_db():
+    """
+    Initialise the database: create tables and types.
+    Uses a PostgreSQL advisory lock to handle concurrent initialization
+    from multiple Uvicorn workers.
+    """
+    async with engine.begin() as conn:
+        # 123456789 is an arbitrary 64-bit integer used as the lock identifier
+        await conn.execute(text("SELECT pg_advisory_xact_lock(123456789)"))
+        await conn.run_sync(Base.metadata.create_all)
+
+
 @asynccontextmanager
 async def lifespan(app: FastAPI):
     # Startup: create all DB tables
-    async with engine.begin() as conn:
-        await conn.run_sync(Base.metadata.create_all)
+    await init_db()
     yield
     # Shutdown: close DB connections
     await engine.dispose()
