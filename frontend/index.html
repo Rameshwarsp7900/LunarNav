@@ -84,6 +84,9 @@ html, body { height: 100%; background: var(--bg); color: var(--text); font-famil
   background: rgba(17,21,32,.85); color: var(--text); cursor: pointer; font-family: var(--font); }
 .map-btn:hover { border-color: var(--accent); color: var(--accent); }
 .map-btn.on { border-color: var(--accent); color: var(--accent); background: rgba(0,200,255,.1); }
+#hazard-alert { padding: 6px 12px; font-size: 11px; font-weight: bold; color: white; background: var(--red);
+  border-radius: 3px; margin-bottom: 5px; animation: hazard-pulse 1.5s infinite; text-align: center; box-shadow: 0 0 10px rgba(255,61,61,0.5); }
+@keyframes hazard-pulse { 0% { opacity: 1; } 50% { opacity: 0.6; } 100% { opacity: 1; } }
 .legend-bar { position: absolute; bottom: 8px; left: 8px; display: flex; gap: 10px; flex-wrap: wrap; }
 .lg { display: flex; align-items: center; gap: 4px; font-size: 9px; color: var(--muted); }
 .lg-sq { width: 10px; height: 10px; border-radius: 2px; }
@@ -279,6 +282,7 @@ input[type=range] { width: 100%; accent-color: var(--accent); }
       <div id="map-wrap">
         <canvas id="mapCanvas"></canvas>
         <div class="map-overlay">
+          <div id="hazard-alert" style="display:none" role="alert" aria-live="assertive">⚠ STEEP SLOPE DETECTED</div>
           <button class="map-btn" id="btn-newmap">New Map</button>
           <button class="map-btn" id="btn-plan">Plan A*</button>
           <button class="map-btn" id="btn-start">Start ▶</button>
@@ -604,6 +608,17 @@ function setPhase(p) {
     failed:     ['b-err','FAILED'],
   };
   if(map[p]) { badge.className='badge '+map[p][0]; badge.textContent=map[p][1]; }
+
+  // ⚡ Optimization: Lock mission-critical controls during active phases to prevent state corruption
+  const active = ['planning','moving','replanning','rrt'].includes(p);
+  ['btn-newmap','btn-plan','rc-newmap','rc-plan'].forEach(id => {
+    const el = document.getElementById(id);
+    if(el) {
+      el.disabled = active;
+      el.setAttribute('aria-disabled', active);
+      el.title = active ? "System busy — control locked" : "";
+    }
+  });
 }
 
 function setDot(id, state, lbl) {
@@ -1133,6 +1148,12 @@ function loop(ts){
       stats.dist+=CELL_M; stats.eng+=CELL_M*0.08;
       if(pathIdx<path.length){
         const cur=path[pathIdx];
+
+        // ⚡ Optimization: Real-time hazard detection for steep slopes
+        const cl = grid[cur.r][cur.c];
+        const haz = document.getElementById('hazard-alert');
+        if(haz) haz.style.display = cl.slope > 0.12 ? 'block' : 'none';
+
         revealZone(cur.r,cur.c,LR_PX,false);
         terrainCache=null;
         if(!pathClear()){ addLog('Obstacle on planned path!','w'); trigReplan(); }
