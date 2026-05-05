@@ -84,6 +84,10 @@ html, body { height: 100%; background: var(--bg); color: var(--text); font-famil
   background: rgba(17,21,32,.85); color: var(--text); cursor: pointer; font-family: var(--font); }
 .map-btn:hover { border-color: var(--accent); color: var(--accent); }
 .map-btn.on { border-color: var(--accent); color: var(--accent); background: rgba(0,200,255,.1); }
+.map-btn:disabled { opacity: .35; cursor: not-allowed; filter: grayscale(0.8); }
+#decision-hud { position: absolute; top: 8px; right: 8px; padding: 6px 12px; font-size: 10px; border-radius: 3px;
+  background: rgba(10,12,18,.85); border: 1px solid var(--accent); color: var(--accent);
+  box-shadow: 0 0 10px rgba(0,200,255,.1); pointer-events: none; max-width: 200px; line-height: 1.4; }
 .legend-bar { position: absolute; bottom: 8px; left: 8px; display: flex; gap: 10px; flex-wrap: wrap; }
 .lg { display: flex; align-items: center; gap: 4px; font-size: 9px; color: var(--muted); }
 .lg-sq { width: 10px; height: 10px; border-radius: 2px; }
@@ -278,12 +282,13 @@ input[type=range] { width: 100%; accent-color: var(--accent); }
     <div class="pane active" id="pane-map">
       <div id="map-wrap">
         <canvas id="mapCanvas"></canvas>
+        <div id="decision-hud">AI STANDBY: Awaiting mission parameters...</div>
         <div class="map-overlay">
-          <button class="map-btn" id="btn-newmap">New Map</button>
-          <button class="map-btn" id="btn-plan">Plan A*</button>
-          <button class="map-btn" id="btn-start">Start ▶</button>
-          <button class="map-btn" id="btn-pause">Pause ⏸</button>
-          <button class="map-btn" id="btn-reset">Reset ↺</button>
+          <button class="map-btn" id="btn-newmap" aria-label="Generate new terrain map" title="Generate new terrain map">New Map</button>
+          <button class="map-btn" id="btn-plan" aria-label="Plan path using A star algorithm" title="Plan path using A* algorithm">Plan A*</button>
+          <button class="map-btn" id="btn-start" aria-label="Start rover traversal" title="Start rover traversal">Start ▶</button>
+          <button class="map-btn" id="btn-pause" aria-label="Pause or resume mission" title="Pause or resume mission">Pause ⏸</button>
+          <button class="map-btn" id="btn-reset" aria-label="Reset mission simulation" title="Reset mission simulation">Reset ↺</button>
         </div>
         <div class="legend-bar">
           <div class="lg"><div class="lg-sq" style="background:#555"></div>Terrain</div>
@@ -510,13 +515,13 @@ input[type=range] { width: 100%; accent-color: var(--accent); }
     <div class="rp-section">
       <div class="rp-title">Controls</div>
       <div class="ctrl-row">
-        <button class="ctrl-btn prim" id="rc-newmap">New Map</button>
-        <button class="ctrl-btn" id="rc-plan">Plan</button>
+        <button class="ctrl-btn prim" id="rc-newmap" aria-label="Generate new terrain map" title="Generate new terrain map">New Map</button>
+        <button class="ctrl-btn" id="rc-plan" aria-label="Plan path" title="Plan path">Plan</button>
       </div>
       <div class="ctrl-row">
-        <button class="ctrl-btn" id="rc-start">▶ Start</button>
-        <button class="ctrl-btn" id="rc-pause">⏸ Pause</button>
-        <button class="ctrl-btn" id="rc-reset">↺ Reset</button>
+        <button class="ctrl-btn" id="rc-start" aria-label="Start rover traversal" title="Start rover traversal">▶ Start</button>
+        <button class="ctrl-btn" id="rc-pause" aria-label="Pause or resume mission" title="Pause or resume mission">⏸ Pause</button>
+        <button class="ctrl-btn" id="rc-reset" aria-label="Reset mission simulation" title="Reset mission simulation">↺ Reset</button>
       </div>
     </div>
 
@@ -594,16 +599,26 @@ function addLog(msg, type='n') {
 function setPhase(p) {
   phase = p;
   const badge = document.getElementById('phase-badge');
+  const hud = document.getElementById('decision-hud');
   const map = {
-    idle:       ['b-idle','IDLE'],
-    planning:   ['b-plan','PLANNING'],
-    moving:     ['b-run','TRAVERSAL'],
-    replanning: ['b-warn','D* REPLAN'],
-    rrt:        ['b-err','RRT* EMERGENCY'],
-    success:    ['b-ok','SUCCESS'],
-    failed:     ['b-err','FAILED'],
+    idle:       ['b-idle','IDLE', 'AI STANDBY: Awaiting mission parameters...'],
+    planning:   ['b-plan','PLANNING', 'AI PLANNING: Computing optimal path via A*...'],
+    moving:     ['b-run','TRAVERSAL', 'AI TRAVERSAL: Rover following optimal trajectory.'],
+    replanning: ['b-warn','D* REPLAN', 'AI REPLANNING: Obstacle detected, updating D* Lite graph...'],
+    rrt:        ['b-err','RRT* EMERGENCY', 'AI EMERGENCY: Sampling recovery route via RRT*...'],
+    success:    ['b-ok','SUCCESS', 'MISSION SUCCESS: Goal reached safely.'],
+    failed:     ['b-err','FAILED', 'MISSION ABORTED: Pathing failure or safety hazard.'],
   };
-  if(map[p]) { badge.className='badge '+map[p][0]; badge.textContent=map[p][1]; }
+  if(map[p]) {
+    badge.className='badge '+map[p][0];
+    badge.textContent=map[p][1];
+    if(hud) hud.innerText = map[p][2];
+  }
+  const isBusy = ['planning', 'moving', 'replanning', 'rrt'].includes(p);
+  ['btn-newmap', 'btn-plan', 'rc-newmap', 'rc-plan'].forEach(id => {
+    const el = document.getElementById(id);
+    if(el) el.disabled = isBusy;
+  });
 }
 
 function setDot(id, state, lbl) {
@@ -1457,7 +1472,7 @@ function buildAlgoCards(){
       desc:'Respects rover turning radius. Fallback if A* path is poor.' },
     { name:'D* Lite', color:'#ff9100', role:'Dynamic Replanner',
       metrics:{Speed:'★★★★☆',Optimality:'Optimal',Memory:'O(n)',Dynamic:'1-5 Hz',
-               Complexity:'O(k log n)','Compute:'<'0.1 sec/update'},
+               Complexity:'O(k log n)','Compute':'&lt;0.1 sec/update'},
       bar:{label:'Replan Speed',pct:88,col:'#ff9100'},
       desc:'Incremental repair. Only updates affected path segments.' },
     { name:'RRT*', color:'#ff3d3d', role:'Emergency Backup',
