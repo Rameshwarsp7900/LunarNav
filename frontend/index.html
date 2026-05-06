@@ -88,6 +88,14 @@ html, body { height: 100%; background: var(--bg); color: var(--text); font-famil
 .lg { display: flex; align-items: center; gap: 4px; font-size: 9px; color: var(--muted); }
 .lg-sq { width: 10px; height: 10px; border-radius: 2px; }
 
+#decision-hud { position: absolute; top: 50%; left: 50%; transform: translate(-50%, -50%);
+  background: rgba(10,12,18,0.85); border: 1px solid var(--accent); padding: 12px 24px;
+  border-radius: 4px; color: var(--accent); font-size: 12px; font-weight: bold;
+  pointer-events: none; z-index: 100; text-align: center; letter-spacing: 0.05em;
+  box-shadow: 0 0 20px rgba(0,200,255,0.15); display: none; }
+#decision-hud.warn { border-color: var(--orange); color: var(--orange); box-shadow: 0 0 20px rgba(255,145,0,0.15); }
+#decision-hud.err { border-color: var(--red); color: var(--red); box-shadow: 0 0 20px rgba(255,61,61,0.15); }
+
 /* ── Mission setup pane ──────────────────────────────────────────────────────── */
 #pane-setup { flex-direction: column; overflow-y: auto; padding: 16px; gap: 14px; }
 .form-card { background: var(--panel); border: 1px solid var(--border); border-radius: 5px; padding: 14px; }
@@ -278,12 +286,13 @@ input[type=range] { width: 100%; accent-color: var(--accent); }
     <div class="pane active" id="pane-map">
       <div id="map-wrap">
         <canvas id="mapCanvas"></canvas>
+        <div id="decision-hud"></div>
         <div class="map-overlay">
-          <button class="map-btn" id="btn-newmap">New Map</button>
-          <button class="map-btn" id="btn-plan">Plan A*</button>
-          <button class="map-btn" id="btn-start">Start ▶</button>
-          <button class="map-btn" id="btn-pause">Pause ⏸</button>
-          <button class="map-btn" id="btn-reset">Reset ↺</button>
+          <button class="map-btn" id="btn-newmap" title="Generate new terrain" aria-label="New Map">New Map</button>
+          <button class="map-btn" id="btn-plan" title="Compute optimal path using A*" aria-label="Plan Path">Plan A*</button>
+          <button class="map-btn" id="btn-start" title="Begin rover traversal" aria-label="Start Mission">Start ▶</button>
+          <button class="map-btn" id="btn-pause" title="Pause or resume mission" aria-label="Pause Mission">Pause ⏸</button>
+          <button class="map-btn" id="btn-reset" title="Reset mission to start" aria-label="Reset Mission">Reset ↺</button>
         </div>
         <div class="legend-bar">
           <div class="lg"><div class="lg-sq" style="background:#555"></div>Terrain</div>
@@ -510,13 +519,13 @@ input[type=range] { width: 100%; accent-color: var(--accent); }
     <div class="rp-section">
       <div class="rp-title">Controls</div>
       <div class="ctrl-row">
-        <button class="ctrl-btn prim" id="rc-newmap">New Map</button>
-        <button class="ctrl-btn" id="rc-plan">Plan</button>
+        <button class="ctrl-btn prim" id="rc-newmap" title="Generate new terrain" aria-label="New Map">New Map</button>
+        <button class="ctrl-btn" id="rc-plan" title="Compute optimal path" aria-label="Plan Path">Plan</button>
       </div>
       <div class="ctrl-row">
-        <button class="ctrl-btn" id="rc-start">▶ Start</button>
-        <button class="ctrl-btn" id="rc-pause">⏸ Pause</button>
-        <button class="ctrl-btn" id="rc-reset">↺ Reset</button>
+        <button class="ctrl-btn" id="rc-start" title="Begin rover traversal" aria-label="Start Mission">▶ Start</button>
+        <button class="ctrl-btn" id="rc-pause" title="Pause or resume mission" aria-label="Pause Mission">⏸ Pause</button>
+        <button class="ctrl-btn" id="rc-reset" title="Reset mission to start" aria-label="Reset Mission">↺ Reset</button>
       </div>
     </div>
 
@@ -594,16 +603,31 @@ function addLog(msg, type='n') {
 function setPhase(p) {
   phase = p;
   const badge = document.getElementById('phase-badge');
+  const hud = document.getElementById('decision-hud');
   const map = {
-    idle:       ['b-idle','IDLE'],
-    planning:   ['b-plan','PLANNING'],
-    moving:     ['b-run','TRAVERSAL'],
-    replanning: ['b-warn','D* REPLAN'],
-    rrt:        ['b-err','RRT* EMERGENCY'],
-    success:    ['b-ok','SUCCESS'],
-    failed:     ['b-err','FAILED'],
+    idle:       ['b-idle','IDLE', ''],
+    planning:   ['b-plan','PLANNING', 'AI: OPTIMIZING TRAJECTORY VIA A*'],
+    moving:     ['b-run','TRAVERSAL', 'ROVER IN MOTION — SENSORS ACTIVE'],
+    replanning: ['b-warn','D* REPLAN', 'HAZARD DETECTED: REPAIRING PATH'],
+    rrt:        ['b-err','RRT* EMERGENCY', 'CRITICAL OBSTRUCTION: SEARCHING ESCAPE'],
+    success:    ['b-ok','SUCCESS', 'MISSION COMPLETE'],
+    failed:     ['b-err','FAILED', 'MISSION ABORTED'],
   };
-  if(map[p]) { badge.className='badge '+map[p][0]; badge.textContent=map[p][1]; }
+  if(map[p]) {
+    badge.className='badge '+map[p][0];
+    badge.textContent=map[p][1];
+    if(hud) {
+      hud.textContent = map[p][2];
+      hud.style.display = map[p][2] ? 'block' : 'none';
+      hud.className = p === 'replanning' ? 'warn' : (p === 'rrt' || p === 'failed') ? 'err' : '';
+    }
+  }
+  // Safety guarding: disable critical controls during processing
+  const busy = ['planning','moving','replanning','rrt'].includes(p);
+  ['btn-newmap','btn-plan','btn-start','rc-newmap','rc-plan','rc-start'].forEach(id => {
+    const el = document.getElementById(id);
+    if(el) el.disabled = busy;
+  });
 }
 
 function setDot(id, state, lbl) {
@@ -1457,7 +1481,7 @@ function buildAlgoCards(){
       desc:'Respects rover turning radius. Fallback if A* path is poor.' },
     { name:'D* Lite', color:'#ff9100', role:'Dynamic Replanner',
       metrics:{Speed:'★★★★☆',Optimality:'Optimal',Memory:'O(n)',Dynamic:'1-5 Hz',
-               Complexity:'O(k log n)','Compute:'<'0.1 sec/update'},
+               Complexity:'O(k log n)','Compute':'< 0.1 sec/update'},
       bar:{label:'Replan Speed',pct:88,col:'#ff9100'},
       desc:'Incremental repair. Only updates affected path segments.' },
     { name:'RRT*', color:'#ff3d3d', role:'Emergency Backup',
