@@ -165,7 +165,25 @@ html, body { height: 100%; background: var(--bg); color: var(--text); font-famil
   border: 1px solid var(--border); background: var(--bg); color: var(--text); cursor: pointer; }
 .ctrl-btn:hover { border-color: var(--accent); color: var(--accent); }
 .ctrl-btn.prim { background: rgba(0,200,255,.12); border-color: var(--accent); color: var(--accent); }
-.ctrl-btn:disabled { opacity: .35; cursor: default; }
+.ctrl-btn:disabled { opacity: .35; cursor: not-allowed; filter: grayscale(0.5); }
+.map-btn:disabled { opacity: .35; cursor: not-allowed; filter: grayscale(0.5); }
+
+#decision-hud {
+  position: absolute;
+  top: 8px;
+  right: 8px;
+  padding: 6px 12px;
+  background: rgba(17,21,32,0.9);
+  border: 1px solid var(--accent);
+  border-radius: 3px;
+  font-size: 10px;
+  z-index: 100;
+  color: var(--accent);
+  display: none;
+  pointer-events: none;
+  letter-spacing: .03em;
+  box-shadow: 0 2px 8px rgba(0,0,0,0.5);
+}
 
 /* Misc */
 .section-hdr { font-size: 10px; letter-spacing: .06em; color: var(--accent); text-transform: uppercase;
@@ -277,13 +295,14 @@ input[type=range] { width: 100%; accent-color: var(--accent); }
     <!-- ① Terrain Map ───────────────────────────────────────────────────── -->
     <div class="pane active" id="pane-map">
       <div id="map-wrap">
+        <div id="decision-hud"></div>
         <canvas id="mapCanvas"></canvas>
         <div class="map-overlay">
-          <button class="map-btn" id="btn-newmap">New Map</button>
-          <button class="map-btn" id="btn-plan">Plan A*</button>
-          <button class="map-btn" id="btn-start">Start ▶</button>
-          <button class="map-btn" id="btn-pause">Pause ⏸</button>
-          <button class="map-btn" id="btn-reset">Reset ↺</button>
+          <button class="map-btn" id="btn-newmap" title="Generate new random terrain" aria-label="Generate new map">New Map</button>
+          <button class="map-btn" id="btn-plan" title="Compute optimal path using A*" aria-label="Plan path">Plan A*</button>
+          <button class="map-btn" id="btn-start" title="Begin rover traversal" aria-label="Start mission">Start ▶</button>
+          <button class="map-btn" id="btn-pause" title="Pause or resume movement" aria-label="Pause mission">Pause ⏸</button>
+          <button class="map-btn" id="btn-reset" title="Reset rover to start" aria-label="Reset mission">Reset ↺</button>
         </div>
         <div class="legend-bar">
           <div class="lg"><div class="lg-sq" style="background:#555"></div>Terrain</div>
@@ -510,13 +529,13 @@ input[type=range] { width: 100%; accent-color: var(--accent); }
     <div class="rp-section">
       <div class="rp-title">Controls</div>
       <div class="ctrl-row">
-        <button class="ctrl-btn prim" id="rc-newmap">New Map</button>
-        <button class="ctrl-btn" id="rc-plan">Plan</button>
+        <button class="ctrl-btn prim" id="rc-newmap" title="Generate new random terrain" aria-label="Generate new map">New Map</button>
+        <button class="ctrl-btn" id="rc-plan" title="Compute optimal path" aria-label="Plan path">Plan</button>
       </div>
       <div class="ctrl-row">
-        <button class="ctrl-btn" id="rc-start">▶ Start</button>
-        <button class="ctrl-btn" id="rc-pause">⏸ Pause</button>
-        <button class="ctrl-btn" id="rc-reset">↺ Reset</button>
+        <button class="ctrl-btn" id="rc-start" title="Begin rover traversal" aria-label="Start mission">▶ Start</button>
+        <button class="ctrl-btn" id="rc-pause" title="Pause or resume movement" aria-label="Pause mission">⏸ Pause</button>
+        <button class="ctrl-btn" id="rc-reset" title="Reset rover to start" aria-label="Reset mission">↺ Reset</button>
       </div>
     </div>
 
@@ -594,16 +613,37 @@ function addLog(msg, type='n') {
 function setPhase(p) {
   phase = p;
   const badge = document.getElementById('phase-badge');
+  const hud = document.getElementById('decision-hud');
   const map = {
-    idle:       ['b-idle','IDLE'],
-    planning:   ['b-plan','PLANNING'],
-    moving:     ['b-run','TRAVERSAL'],
-    replanning: ['b-warn','D* REPLAN'],
-    rrt:        ['b-err','RRT* EMERGENCY'],
-    success:    ['b-ok','SUCCESS'],
-    failed:     ['b-err','FAILED'],
+    idle:       ['b-idle','IDLE', ''],
+    planning:   ['b-plan','PLANNING', 'AI: Computing optimal A* path...'],
+    moving:     ['b-run','TRAVERSAL', 'AI: Executing path. Monitoring LiDAR...'],
+    replanning: ['b-warn','D* REPLAN', 'AI: Obstacle detected! Replanning...'],
+    rrt:        ['b-err','RRT* EMERGENCY', 'AI: Trapped! Sampling emergency RRT* escape...'],
+    success:    ['b-ok','SUCCESS', 'AI: Goal reached safely.'],
+    failed:     ['b-err','FAILED', 'AI: Mission failed. Manual intervention needed.'],
   };
-  if(map[p]) { badge.className='badge '+map[p][0]; badge.textContent=map[p][1]; }
+
+  if(map[p]) {
+    badge.className = 'badge ' + map[p][0];
+    badge.textContent = map[p][1];
+    if(hud) {
+      hud.textContent = map[p][2];
+      hud.style.display = map[p][2] ? 'block' : 'none';
+    }
+  }
+
+  // Button guarding: disable controls during active AI decision/movement phases
+  const busy = ['planning', 'moving', 'replanning', 'rrt'].includes(p);
+  ['btn-newmap', 'btn-plan', 'rc-newmap', 'rc-plan'].forEach(id => {
+    const el = document.getElementById(id);
+    if(el) el.disabled = busy;
+  });
+  // Disable Start while moving or planning
+  ['btn-start', 'rc-start'].forEach(id => {
+    const el = document.getElementById(id);
+    if(el) el.disabled = busy || p === 'success';
+  });
 }
 
 function setDot(id, state, lbl) {
@@ -1457,7 +1497,7 @@ function buildAlgoCards(){
       desc:'Respects rover turning radius. Fallback if A* path is poor.' },
     { name:'D* Lite', color:'#ff9100', role:'Dynamic Replanner',
       metrics:{Speed:'★★★★☆',Optimality:'Optimal',Memory:'O(n)',Dynamic:'1-5 Hz',
-               Complexity:'O(k log n)','Compute:'<'0.1 sec/update'},
+               Complexity:'O(k log n)','Compute':'<0.1 sec/update'},
       bar:{label:'Replan Speed',pct:88,col:'#ff9100'},
       desc:'Incremental repair. Only updates affected path segments.' },
     { name:'RRT*', color:'#ff3d3d', role:'Emergency Backup',
