@@ -186,6 +186,8 @@ input[type=range] { width: 100%; accent-color: var(--accent); }
   <span class="sep">│</span>
   <span class="badge b-idle" id="phase-badge">IDLE</span>
   <span class="badge b-idle" id="algo-badge">NO MISSION</span>
+  <span class="sep">│</span>
+  <div id="decision-hud" style="font-size:10px; color:var(--yellow); font-weight:bold; letter-spacing:0.05em;">SYSTEM READY</div>
   <div class="right">
     <span>Chandrayaan-2 South Pole | 100 km alt | 5 m/px</span>
     <span>RPLiDAR A3 — 100 m range</span>
@@ -594,16 +596,25 @@ function addLog(msg, type='n') {
 function setPhase(p) {
   phase = p;
   const badge = document.getElementById('phase-badge');
+  const hud = document.getElementById('decision-hud');
   const map = {
-    idle:       ['b-idle','IDLE'],
-    planning:   ['b-plan','PLANNING'],
-    moving:     ['b-run','TRAVERSAL'],
-    replanning: ['b-warn','D* REPLAN'],
-    rrt:        ['b-err','RRT* EMERGENCY'],
-    success:    ['b-ok','SUCCESS'],
-    failed:     ['b-err','FAILED'],
+    idle:       ['b-idle','IDLE', 'SYSTEM READY'],
+    planning:   ['b-plan','PLANNING', 'AI ANALYZING TERRAIN'],
+    moving:     ['b-run','TRAVERSAL', 'EXECUTING PATH'],
+    replanning: ['b-warn','D* REPLAN', 'HAZARD DETECTED: REPLANNING'],
+    rrt:        ['b-err','RRT* EMERGENCY', 'RRT* FALLBACK: ESCAPING TRAP'],
+    success:    ['b-ok','SUCCESS', 'MISSION COMPLETE'],
+    failed:     ['b-err','FAILED', 'MISSION FAILURE'],
   };
-  if(map[p]) { badge.className='badge '+map[p][0]; badge.textContent=map[p][1]; }
+  if(map[p]) {
+    badge.className='badge '+map[p][0];
+    badge.textContent=map[p][1];
+    if(hud) hud.textContent = map[p][2];
+  }
+  const busy = ['planning','moving','replanning','rrt'].includes(p);
+  ['btn-newmap','btn-plan','btn-start','rc-newmap','rc-plan','rc-start'].forEach(id => {
+    const b = document.getElementById(id); if(b) b.disabled = busy;
+  });
 }
 
 function setDot(id, state, lbl) {
@@ -1457,7 +1468,7 @@ function buildAlgoCards(){
       desc:'Respects rover turning radius. Fallback if A* path is poor.' },
     { name:'D* Lite', color:'#ff9100', role:'Dynamic Replanner',
       metrics:{Speed:'★★★★☆',Optimality:'Optimal',Memory:'O(n)',Dynamic:'1-5 Hz',
-               Complexity:'O(k log n)','Compute:'<'0.1 sec/update'},
+               Complexity:'O(k log n)','Compute':'< 0.1 sec/update'},
       bar:{label:'Replan Speed',pct:88,col:'#ff9100'},
       desc:'Incremental repair. Only updates affected path segments.' },
     { name:'RRT*', color:'#ff3d3d', role:'Emergency Backup',
