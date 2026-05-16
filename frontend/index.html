@@ -165,7 +165,21 @@ html, body { height: 100%; background: var(--bg); color: var(--text); font-famil
   border: 1px solid var(--border); background: var(--bg); color: var(--text); cursor: pointer; }
 .ctrl-btn:hover { border-color: var(--accent); color: var(--accent); }
 .ctrl-btn.prim { background: rgba(0,200,255,.12); border-color: var(--accent); color: var(--accent); }
-.ctrl-btn:disabled { opacity: .35; cursor: default; }
+.ctrl-btn:disabled, .map-btn:disabled { opacity: .35; filter: grayscale(0.5); cursor: not-allowed; }
+
+button:focus-visible, input:focus-visible, select:focus-visible, textarea:focus-visible {
+  outline: 2px solid var(--accent);
+  outline-offset: 2px;
+}
+
+#decision-hud {
+  position: absolute; top: 50%; left: 50%; transform: translate(-50%, -50%);
+  background: rgba(10,12,18,.85); border: 1px solid var(--accent);
+  padding: 15px 25px; border-radius: 5px; text-align: center; z-index: 100;
+  display: none; pointer-events: none; box-shadow: 0 0 20px rgba(0,200,255,.2);
+}
+#decision-hud .hud-title { color: var(--accent); font-size: 14px; font-weight: bold; margin-bottom: 5px; text-transform: uppercase; letter-spacing: .1em; }
+#decision-hud .hud-msg { color: var(--text); font-size: 11px; }
 
 /* Misc */
 .section-hdr { font-size: 10px; letter-spacing: .06em; color: var(--accent); text-transform: uppercase;
@@ -284,6 +298,10 @@ input[type=range] { width: 100%; accent-color: var(--accent); }
           <button class="map-btn" id="btn-start">Start ▶</button>
           <button class="map-btn" id="btn-pause">Pause ⏸</button>
           <button class="map-btn" id="btn-reset">Reset ↺</button>
+        </div>
+        <div id="decision-hud" aria-live="polite">
+          <div class="hud-title">AI Decision</div>
+          <div class="hud-msg" id="hud-msg">Calculating...</div>
         </div>
         <div class="legend-bar">
           <div class="lg"><div class="lg-sq" style="background:#555"></div>Terrain</div>
@@ -591,7 +609,7 @@ function addLog(msg, type='n') {
   while(lb.children.length > 200) lb.removeChild(lb.lastChild);
 }
 
-function setPhase(p) {
+function setPhase(p, msg) {
   phase = p;
   const badge = document.getElementById('phase-badge');
   const map = {
@@ -604,6 +622,24 @@ function setPhase(p) {
     failed:     ['b-err','FAILED'],
   };
   if(map[p]) { badge.className='badge '+map[p][0]; badge.textContent=map[p][1]; }
+
+  // Decision HUD logic
+  const hud = document.getElementById('decision-hud');
+  const hudMsg = document.getElementById('hud-msg');
+  if (msg && (p === 'planning' || p === 'replanning' || p === 'rrt')) {
+    hud.style.display = 'block';
+    hudMsg.textContent = msg;
+  } else {
+    hud.style.display = 'none';
+  }
+
+  // Button guarding
+  const guarded = ['btn-newmap', 'rc-newmap', 'btn-plan', 'rc-plan'];
+  const isBusy = ['planning', 'moving', 'replanning', 'rrt'].includes(p);
+  guarded.forEach(id => {
+    const el = document.getElementById(id);
+    if (el) el.disabled = isBusy;
+  });
 }
 
 function setDot(id, state, lbl) {
@@ -942,7 +978,7 @@ function pathClear(){
 
 function trigReplan(){
   if(!path||phase==='rrt'||phase==='replanning')return;
-  moving=false; setPhase('replanning');
+  moving=false; setPhase('replanning', 'Obstacle detected. D* Lite recalculating local path...');
   setDot('dstar','w','D* Lite — replanning…');
   stats.rep++; updateStats();
   addLog(`D* Lite triggered (attempt ${failCount+1})`,'w');
@@ -968,7 +1004,7 @@ function trigReplan(){
 }
 
 function trigRRT(sr,sc){
-  setPhase('rrt');
+  setPhase('rrt', 'Local replan failed. RRT* searching for emergency escape path...');
   setDot('rrt','w','RRT* — searching…');
   document.getElementById('algo-badge').className='badge b-err';
   document.getElementById('algo-badge').textContent='RRT* EMERGENCY';
@@ -1214,7 +1250,7 @@ function attachMapControls(prefix){
   });
   document.getElementById(prefix+'-plan')?.addEventListener('click',()=>{
     if(phase==='moving'||phase==='rrt')return;
-    setPhase('planning');
+    setPhase('planning', 'AI calculating global optimal path using A*...');
     setDot('astar','w','A* — computing…');
     setDot('unet','w','U-Net cost map…');
     addLog('A* path planning initiated…','i');
@@ -1457,7 +1493,7 @@ function buildAlgoCards(){
       desc:'Respects rover turning radius. Fallback if A* path is poor.' },
     { name:'D* Lite', color:'#ff9100', role:'Dynamic Replanner',
       metrics:{Speed:'★★★★☆',Optimality:'Optimal',Memory:'O(n)',Dynamic:'1-5 Hz',
-               Complexity:'O(k log n)','Compute:'<'0.1 sec/update'},
+               Complexity:'O(k log n)','Compute':'< 0.1 sec/update'},
       bar:{label:'Replan Speed',pct:88,col:'#ff9100'},
       desc:'Incremental repair. Only updates affected path segments.' },
     { name:'RRT*', color:'#ff3d3d', role:'Emergency Backup',
