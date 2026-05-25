@@ -165,7 +165,9 @@ html, body { height: 100%; background: var(--bg); color: var(--text); font-famil
   border: 1px solid var(--border); background: var(--bg); color: var(--text); cursor: pointer; }
 .ctrl-btn:hover { border-color: var(--accent); color: var(--accent); }
 .ctrl-btn.prim { background: rgba(0,200,255,.12); border-color: var(--accent); color: var(--accent); }
-.ctrl-btn:disabled { opacity: .35; cursor: default; }
+.ctrl-btn:disabled { opacity: .35; cursor: not-allowed; filter: grayscale(0.5); }
+.map-btn:disabled { opacity: .35; cursor: not-allowed; filter: grayscale(0.5); }
+#decision-hud { padding: 6px 12px; background: rgba(10,12,18,0.9); border: 1px solid var(--accent); color: var(--accent); font-size: 10px; font-weight: bold; border-radius: 3px; margin-top: 8px; display: none; box-shadow: 0 0 10px rgba(0,200,255,0.2); }
 
 /* Misc */
 .section-hdr { font-size: 10px; letter-spacing: .06em; color: var(--accent); text-transform: uppercase;
@@ -284,6 +286,7 @@ input[type=range] { width: 100%; accent-color: var(--accent); }
           <button class="map-btn" id="btn-start">Start ▶</button>
           <button class="map-btn" id="btn-pause">Pause ⏸</button>
           <button class="map-btn" id="btn-reset">Reset ↺</button>
+          <div id="decision-hud" aria-live="polite"></div>
         </div>
         <div class="legend-bar">
           <div class="lg"><div class="lg-sq" style="background:#555"></div>Terrain</div>
@@ -591,19 +594,20 @@ function addLog(msg, type='n') {
   while(lb.children.length > 200) lb.removeChild(lb.lastChild);
 }
 
-function setPhase(p) {
+function setPhase(p, msg = '') {
   phase = p;
   const badge = document.getElementById('phase-badge');
+  const hud = document.getElementById('decision-hud');
   const map = {
-    idle:       ['b-idle','IDLE'],
-    planning:   ['b-plan','PLANNING'],
-    moving:     ['b-run','TRAVERSAL'],
-    replanning: ['b-warn','D* REPLAN'],
-    rrt:        ['b-err','RRT* EMERGENCY'],
-    success:    ['b-ok','SUCCESS'],
-    failed:     ['b-err','FAILED'],
+    idle: ['b-idle','IDLE'], planning: ['b-plan','PLANNING'], moving: ['b-run','TRAVERSAL'],
+    replanning: ['b-warn','D* REPLAN'], rrt: ['b-err','RRT* EMERGENCY'], success: ['b-ok','SUCCESS'], failed: ['b-err','FAILED']
   };
   if(map[p]) { badge.className='badge '+map[p][0]; badge.textContent=map[p][1]; }
+  if(hud) { hud.textContent = 'AI: ' + msg; hud.style.display = msg ? 'block' : 'none'; }
+  const guarded = ['planning','replanning','rrt','moving'].includes(p);
+  ['btn-newmap','btn-plan','rc-newmap','rc-plan'].forEach(id => {
+    const el = document.getElementById(id); if(el) el.disabled = guarded;
+  });
 }
 
 function setDot(id, state, lbl) {
@@ -942,7 +946,7 @@ function pathClear(){
 
 function trigReplan(){
   if(!path||phase==='rrt'||phase==='replanning')return;
-  moving=false; setPhase('replanning');
+  moving=false; setPhase('replanning', 'Obstacle detected! Replanning via D* Lite...');
   setDot('dstar','w','D* Lite — replanning…');
   stats.rep++; updateStats();
   addLog(`D* Lite triggered (attempt ${failCount+1})`,'w');
@@ -1214,7 +1218,7 @@ function attachMapControls(prefix){
   });
   document.getElementById(prefix+'-plan')?.addEventListener('click',()=>{
     if(phase==='moving'||phase==='rrt')return;
-    setPhase('planning');
+    setPhase('planning', 'Calculating optimal path via A*...');
     setDot('astar','w','A* — computing…');
     setDot('unet','w','U-Net cost map…');
     addLog('A* path planning initiated…','i');
@@ -1457,7 +1461,7 @@ function buildAlgoCards(){
       desc:'Respects rover turning radius. Fallback if A* path is poor.' },
     { name:'D* Lite', color:'#ff9100', role:'Dynamic Replanner',
       metrics:{Speed:'★★★★☆',Optimality:'Optimal',Memory:'O(n)',Dynamic:'1-5 Hz',
-               Complexity:'O(k log n)','Compute:'<'0.1 sec/update'},
+               Complexity:'O(k log n)','Compute':'< 0.1 sec/update'},
       bar:{label:'Replan Speed',pct:88,col:'#ff9100'},
       desc:'Incremental repair. Only updates affected path segments.' },
     { name:'RRT*', color:'#ff3d3d', role:'Emergency Backup',
