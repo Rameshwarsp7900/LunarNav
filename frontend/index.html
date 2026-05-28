@@ -279,11 +279,12 @@ input[type=range] { width: 100%; accent-color: var(--accent); }
       <div id="map-wrap">
         <canvas id="mapCanvas"></canvas>
         <div class="map-overlay">
-          <button class="map-btn" id="btn-newmap">New Map</button>
-          <button class="map-btn" id="btn-plan">Plan A*</button>
-          <button class="map-btn" id="btn-start">Start ▶</button>
-          <button class="map-btn" id="btn-pause">Pause ⏸</button>
-          <button class="map-btn" id="btn-reset">Reset ↺</button>
+          <div id="decision-hud" style="padding:6px 10px;background:rgba(10,12,18,0.85);border:1px solid var(--accent);color:var(--accent);font-size:10px;border-radius:3px;margin-bottom:8px;display:none;max-width:180px;line-height:1.4;box-shadow:0 0 10px rgba(0,200,255,0.15)">Ready</div>
+          <button class="map-btn" id="btn-newmap" aria-label="Generate new mission map">New Map</button>
+          <button class="map-btn" id="btn-plan" aria-label="Plan path using A*">Plan A*</button>
+          <button class="map-btn" id="btn-start" aria-label="Start rover traversal">Start ▶</button>
+          <button class="map-btn" id="btn-pause" aria-label="Pause or resume mission">Pause ⏸</button>
+          <button class="map-btn" id="btn-reset" aria-label="Reset mission state">Reset ↺</button>
         </div>
         <div class="legend-bar">
           <div class="lg"><div class="lg-sq" style="background:#555"></div>Terrain</div>
@@ -510,13 +511,13 @@ input[type=range] { width: 100%; accent-color: var(--accent); }
     <div class="rp-section">
       <div class="rp-title">Controls</div>
       <div class="ctrl-row">
-        <button class="ctrl-btn prim" id="rc-newmap">New Map</button>
-        <button class="ctrl-btn" id="rc-plan">Plan</button>
+        <button class="ctrl-btn prim" id="rc-newmap" aria-label="Generate new mission map">New Map</button>
+        <button class="ctrl-btn" id="rc-plan" aria-label="Plan path using A*">Plan</button>
       </div>
       <div class="ctrl-row">
-        <button class="ctrl-btn" id="rc-start">▶ Start</button>
-        <button class="ctrl-btn" id="rc-pause">⏸ Pause</button>
-        <button class="ctrl-btn" id="rc-reset">↺ Reset</button>
+        <button class="ctrl-btn" id="rc-start" aria-label="Start rover traversal">▶ Start</button>
+        <button class="ctrl-btn" id="rc-pause" aria-label="Pause or resume mission">⏸ Pause</button>
+        <button class="ctrl-btn" id="rc-reset" aria-label="Reset mission state">↺ Reset</button>
       </div>
     </div>
 
@@ -591,9 +592,10 @@ function addLog(msg, type='n') {
   while(lb.children.length > 200) lb.removeChild(lb.lastChild);
 }
 
-function setPhase(p) {
+function setPhase(p, msg) {
   phase = p;
   const badge = document.getElementById('phase-badge');
+  const hud = document.getElementById('decision-hud');
   const map = {
     idle:       ['b-idle','IDLE'],
     planning:   ['b-plan','PLANNING'],
@@ -604,6 +606,20 @@ function setPhase(p) {
     failed:     ['b-err','FAILED'],
   };
   if(map[p]) { badge.className='badge '+map[p][0]; badge.textContent=map[p][1]; }
+
+  if(msg) {
+    hud.textContent = msg;
+    hud.style.display = 'block';
+  } else if(p === 'idle' || p === 'success' || p === 'failed') {
+    hud.style.display = 'none';
+  }
+
+  // Guard mission-critical buttons
+  const isBusy = ['planning', 'replanning', 'rrt', 'moving'].includes(p);
+  ['btn-newmap', 'btn-plan', 'rc-newmap', 'rc-plan'].forEach(id => {
+    const btn = document.getElementById(id);
+    if(btn) btn.disabled = isBusy;
+  });
 }
 
 function setDot(id, state, lbl) {
@@ -942,7 +958,7 @@ function pathClear(){
 
 function trigReplan(){
   if(!path||phase==='rrt'||phase==='replanning')return;
-  moving=false; setPhase('replanning');
+  moving=false; setPhase('replanning', 'D* Lite: Re-routing around obstacle');
   setDot('dstar','w','D* Lite — replanning…');
   stats.rep++; updateStats();
   addLog(`D* Lite triggered (attempt ${failCount+1})`,'w');
@@ -952,7 +968,7 @@ function trigReplan(){
     if(np&&np.length>1){
       replanPath=np; path=np; pathIdx=0; rFrac=0; failCount=0;
       setDot('dstar','on','D* Lite — replan OK');
-      setPhase('moving'); moving=true;
+      setPhase('moving', 'D* Lite: Continuing traversal'); moving=true;
       addLog(`D* Lite: new path (${np.length} pts)`,'i');
       document.getElementById('algo-badge').className='badge b-warn';
       document.getElementById('algo-badge').textContent='D* Lite';
@@ -968,7 +984,7 @@ function trigReplan(){
 }
 
 function trigRRT(sr,sc){
-  setPhase('rrt');
+  setPhase('rrt', 'RRT*: Emergency global replan triggered');
   setDot('rrt','w','RRT* — searching…');
   document.getElementById('algo-badge').className='badge b-err';
   document.getElementById('algo-badge').textContent='RRT* EMERGENCY';
@@ -980,7 +996,7 @@ function trigRRT(sr,sc){
     if(np){
       path=np; replanPath=np; pathIdx=0; rFrac=0; failCount=0;
       setDot('rrt','on','RRT* — path found');
-      setPhase('moving'); moving=true;
+      setPhase('moving', 'RRT*: Navigating escape path'); moving=true;
       addLog(`RRT*: escape path (${np.length} waypoints)`,'s');
     } else {
       setDot('rrt','e','RRT* — failed');
@@ -1138,7 +1154,7 @@ function loop(ts){
         if(!pathClear()){ addLog('Obstacle on planned path!','w'); trigReplan(); }
       }
       if(pathIdx>=path.length-1){
-        setPhase('success'); moving=false;
+        setPhase('success', 'Mission Success: Goal reached'); moving=false;
         setDot('lidar','on','RPLiDAR A3 — scan complete');
         addLog(`MISSION COMPLETE — ${Math.round(stats.dist)}m, ${stats.rep} replans, ${stats.min} mineral samples`,'s');
       }
@@ -1214,7 +1230,7 @@ function attachMapControls(prefix){
   });
   document.getElementById(prefix+'-plan')?.addEventListener('click',()=>{
     if(phase==='moving'||phase==='rrt')return;
-    setPhase('planning');
+    setPhase('planning', 'A*: Global optimal path planning');
     setDot('astar','w','A* — computing…');
     setDot('unet','w','U-Net cost map…');
     addLog('A* path planning initiated…','i');
@@ -1241,7 +1257,7 @@ function attachMapControls(prefix){
   });
   document.getElementById(prefix+'-start')?.addEventListener('click',()=>{
     if(!path||phase==='moving')return;
-    setPhase('moving');
+    setPhase('moving', 'Rover in motion: Navigating to goal');
     setDot('lidar','on','RPLiDAR A3 — scanning');
     setDot('dstar','idle','D* Lite — monitoring');
     moving=true;paused=false;
@@ -1457,7 +1473,7 @@ function buildAlgoCards(){
       desc:'Respects rover turning radius. Fallback if A* path is poor.' },
     { name:'D* Lite', color:'#ff9100', role:'Dynamic Replanner',
       metrics:{Speed:'★★★★☆',Optimality:'Optimal',Memory:'O(n)',Dynamic:'1-5 Hz',
-               Complexity:'O(k log n)','Compute:'<'0.1 sec/update'},
+               Complexity:'O(k log n)','Compute':'< 0.1 sec/update'},
       bar:{label:'Replan Speed',pct:88,col:'#ff9100'},
       desc:'Incremental repair. Only updates affected path segments.' },
     { name:'RRT*', color:'#ff3d3d', role:'Emergency Backup',
