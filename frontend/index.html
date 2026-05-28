@@ -165,7 +165,36 @@ html, body { height: 100%; background: var(--bg); color: var(--text); font-famil
   border: 1px solid var(--border); background: var(--bg); color: var(--text); cursor: pointer; }
 .ctrl-btn:hover { border-color: var(--accent); color: var(--accent); }
 .ctrl-btn.prim { background: rgba(0,200,255,.12); border-color: var(--accent); color: var(--accent); }
-.ctrl-btn:disabled { opacity: .35; cursor: default; }
+.ctrl-btn:disabled, .map-btn:disabled {
+  opacity: .35 !important;
+  cursor: not-allowed !important;
+  filter: grayscale(0.5);
+  pointer-events: none;
+}
+.ctrl-btn:focus-visible, .map-btn:focus-visible, .tab:focus-visible {
+  outline: 2px solid var(--accent);
+  outline-offset: 2px;
+}
+
+/* Decision HUD */
+#decision-hud {
+  position: absolute;
+  top: 8px;
+  right: 8px;
+  width: 220px;
+  background: rgba(10, 12, 18, 0.85);
+  border: 1px solid var(--accent);
+  border-radius: 4px;
+  padding: 10px;
+  font-size: 10px;
+  line-height: 1.4;
+  color: var(--accent);
+  pointer-events: none;
+  display: none;
+  box-shadow: 0 4px 12px rgba(0,0,0,0.5);
+  z-index: 100;
+}
+#decision-hud b { display: block; margin-bottom: 4px; text-transform: uppercase; font-size: 9px; letter-spacing: 0.05em; }
 
 /* Misc */
 .section-hdr { font-size: 10px; letter-spacing: .06em; color: var(--accent); text-transform: uppercase;
@@ -278,12 +307,13 @@ input[type=range] { width: 100%; accent-color: var(--accent); }
     <div class="pane active" id="pane-map">
       <div id="map-wrap">
         <canvas id="mapCanvas"></canvas>
+        <div id="decision-hud"><b>AI Decision Log</b><span id="hud-msg">System initialised. Waiting for mission parameters...</span></div>
         <div class="map-overlay">
-          <button class="map-btn" id="btn-newmap">New Map</button>
-          <button class="map-btn" id="btn-plan">Plan A*</button>
-          <button class="map-btn" id="btn-start">Start ▶</button>
-          <button class="map-btn" id="btn-pause">Pause ⏸</button>
-          <button class="map-btn" id="btn-reset">Reset ↺</button>
+          <button class="map-btn" id="btn-newmap" aria-label="Generate new mission map">New Map</button>
+          <button class="map-btn" id="btn-plan" aria-label="Compute global path using A*">Plan A*</button>
+          <button class="map-btn" id="btn-start" aria-label="Start rover traversal">Start ▶</button>
+          <button class="map-btn" id="btn-pause" aria-label="Pause or resume mission">Pause ⏸</button>
+          <button class="map-btn" id="btn-reset" aria-label="Reset mission state">Reset ↺</button>
         </div>
         <div class="legend-bar">
           <div class="lg"><div class="lg-sq" style="background:#555"></div>Terrain</div>
@@ -510,13 +540,13 @@ input[type=range] { width: 100%; accent-color: var(--accent); }
     <div class="rp-section">
       <div class="rp-title">Controls</div>
       <div class="ctrl-row">
-        <button class="ctrl-btn prim" id="rc-newmap">New Map</button>
-        <button class="ctrl-btn" id="rc-plan">Plan</button>
+        <button class="ctrl-btn prim" id="rc-newmap" aria-label="Remote: New Map">New Map</button>
+        <button class="ctrl-btn" id="rc-plan" aria-label="Remote: Plan Path">Plan</button>
       </div>
       <div class="ctrl-row">
-        <button class="ctrl-btn" id="rc-start">▶ Start</button>
-        <button class="ctrl-btn" id="rc-pause">⏸ Pause</button>
-        <button class="ctrl-btn" id="rc-reset">↺ Reset</button>
+        <button class="ctrl-btn" id="rc-start" aria-label="Remote: Start Traversal">▶ Start</button>
+        <button class="ctrl-btn" id="rc-pause" aria-label="Remote: Pause/Resume">⏸ Pause</button>
+        <button class="ctrl-btn" id="rc-reset" aria-label="Remote: Reset">↺ Reset</button>
       </div>
     </div>
 
@@ -591,9 +621,19 @@ function addLog(msg, type='n') {
   while(lb.children.length > 200) lb.removeChild(lb.lastChild);
 }
 
-function setPhase(p) {
+function setPhase(p, msg) {
   phase = p;
   const badge = document.getElementById('phase-badge');
+  const hud = document.getElementById('decision-hud');
+  const hmsg = document.getElementById('hud-msg');
+
+  if (msg) {
+    hud.style.display = 'block';
+    hmsg.textContent = msg;
+  } else if (p === 'idle') {
+    hud.style.display = 'none';
+  }
+
   const map = {
     idle:       ['b-idle','IDLE'],
     planning:   ['b-plan','PLANNING'],
@@ -604,6 +644,13 @@ function setPhase(p) {
     failed:     ['b-err','FAILED'],
   };
   if(map[p]) { badge.className='badge '+map[p][0]; badge.textContent=map[p][1]; }
+
+  // Contextual Guarding
+  const busy = ['planning', 'moving', 'replanning', 'rrt'].includes(p);
+  ['btn-newmap', 'btn-plan', 'rc-newmap', 'rc-plan'].forEach(id => {
+    const btn = document.getElementById(id);
+    if (btn) btn.disabled = busy;
+  });
 }
 
 function setDot(id, state, lbl) {
@@ -942,7 +989,7 @@ function pathClear(){
 
 function trigReplan(){
   if(!path||phase==='rrt'||phase==='replanning')return;
-  moving=false; setPhase('replanning');
+  moving=false; setPhase('replanning', 'D* Lite: Obstacle detected on path. Recalculating local repair...');
   setDot('dstar','w','D* Lite — replanning…');
   stats.rep++; updateStats();
   addLog(`D* Lite triggered (attempt ${failCount+1})`,'w');
@@ -952,7 +999,7 @@ function trigReplan(){
     if(np&&np.length>1){
       replanPath=np; path=np; pathIdx=0; rFrac=0; failCount=0;
       setDot('dstar','on','D* Lite — replan OK');
-      setPhase('moving'); moving=true;
+      setPhase('moving', 'D* Lite: Path repaired successfully. Resuming traversal.'); moving=true;
       addLog(`D* Lite: new path (${np.length} pts)`,'i');
       document.getElementById('algo-badge').className='badge b-warn';
       document.getElementById('algo-badge').textContent='D* Lite';
@@ -961,14 +1008,14 @@ function trigReplan(){
       setDot('dstar','e','D* Lite — failed');
       addLog('D* Lite: no path found','e');
       if(failCount>=3) trigRRT(cur.r,cur.c);
-      else { setPhase('failed'); addLog('Manual intervention required','e'); }
+      else { setPhase('failed', 'D* Lite: Local repair failed. Obstacle may be impassable.'); addLog('Manual intervention required','e'); }
     }
     updateStats();
   },350);
 }
 
 function trigRRT(sr,sc){
-  setPhase('rrt');
+  setPhase('rrt', 'RRT*: Local repairs failed. Executing emergency global sampling to find escape path...');
   setDot('rrt','w','RRT* — searching…');
   document.getElementById('algo-badge').className='badge b-err';
   document.getElementById('algo-badge').textContent='RRT* EMERGENCY';
@@ -980,11 +1027,11 @@ function trigRRT(sr,sc){
     if(np){
       path=np; replanPath=np; pathIdx=0; rFrac=0; failCount=0;
       setDot('rrt','on','RRT* — path found');
-      setPhase('moving'); moving=true;
+      setPhase('moving', 'RRT*: Escape path found via stochastic sampling. Resuming traversal.'); moving=true;
       addLog(`RRT*: escape path (${np.length} waypoints)`,'s');
     } else {
       setDot('rrt','e','RRT* — failed');
-      setPhase('failed');
+      setPhase('failed', 'RRT*: All emergency planning failed. Rover is trapped.');
       addLog('RRT*: no viable path — mission abort','e');
     }
     updateStats();
@@ -1214,7 +1261,7 @@ function attachMapControls(prefix){
   });
   document.getElementById(prefix+'-plan')?.addEventListener('click',()=>{
     if(phase==='moving'||phase==='rrt')return;
-    setPhase('planning');
+    setPhase('planning', 'A*: Computing global optimal path using 8-connected grid search...');
     setDot('astar','w','A* — computing…');
     setDot('unet','w','U-Net cost map…');
     addLog('A* path planning initiated…','i');
@@ -1226,7 +1273,7 @@ function attachMapControls(prefix){
         setDot('unet','on','U-Net active');
         document.getElementById('algo-badge').className='badge b-plan';
         document.getElementById('algo-badge').textContent='A* COMPLETE';
-        setPhase('idle');
+        setPhase('idle', 'A*: Optimal path identified. Ready for traversal.');
         addLog(`A* success: ${np.length} waypoints, ~${Math.round(np.length*CELL_M)}m`,'s');
         document.getElementById('s-wpts').textContent=np.length;
         document.getElementById('s-dist').textContent=Math.round(np.length*CELL_M);
@@ -1234,14 +1281,14 @@ function attachMapControls(prefix){
       } else {
         setDot('astar','e','A* — no path');
         setDot('unet','off','U-Net idle');
-        setPhase('failed');
+        setPhase('failed', 'A*: No viable path found. Terrain may be too complex.');
         addLog('A* failed — try RRT* manually or generate new map','e');
       }
     },450);
   });
   document.getElementById(prefix+'-start')?.addEventListener('click',()=>{
     if(!path||phase==='moving')return;
-    setPhase('moving');
+    setPhase('moving', 'TRAVERSAL: Executing path. RPLiDAR A3 active for hazard detection.');
     setDot('lidar','on','RPLiDAR A3 — scanning');
     setDot('dstar','idle','D* Lite — monitoring');
     moving=true;paused=false;
@@ -1457,7 +1504,7 @@ function buildAlgoCards(){
       desc:'Respects rover turning radius. Fallback if A* path is poor.' },
     { name:'D* Lite', color:'#ff9100', role:'Dynamic Replanner',
       metrics:{Speed:'★★★★☆',Optimality:'Optimal',Memory:'O(n)',Dynamic:'1-5 Hz',
-               Complexity:'O(k log n)','Compute:'<'0.1 sec/update'},
+               Complexity:'O(k log n)','Compute':'< 0.1 sec/update'},
       bar:{label:'Replan Speed',pct:88,col:'#ff9100'},
       desc:'Incremental repair. Only updates affected path segments.' },
     { name:'RRT*', color:'#ff3d3d', role:'Emergency Backup',
