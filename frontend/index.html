@@ -196,6 +196,22 @@ html, body { height: 100%; background: var(--bg); color: var(--text); font-famil
 }
 #decision-hud b { display: block; margin-bottom: 4px; text-transform: uppercase; font-size: 9px; letter-spacing: 0.05em; }
 
+#map-inspector {
+  position: absolute;
+  background: rgba(10, 12, 18, 0.9);
+  border: 1px solid var(--accent);
+  color: var(--accent);
+  padding: 8px;
+  font-size: 10px;
+  pointer-events: none;
+  z-index: 1000;
+  display: none;
+  border-radius: 3px;
+  box-shadow: 0 4px 12px rgba(0,0,0,0.5);
+  white-space: nowrap;
+}
+#map-inspector b { color: var(--text); margin-right: 4px; }
+
 /* Misc */
 .section-hdr { font-size: 10px; letter-spacing: .06em; color: var(--accent); text-transform: uppercase;
   padding: 6px 0; border-bottom: 1px solid var(--border); margin-bottom: 10px; }
@@ -307,6 +323,7 @@ input[type=range] { width: 100%; accent-color: var(--accent); }
     <div class="pane active" id="pane-map">
       <div id="map-wrap">
         <canvas id="mapCanvas"></canvas>
+        <div id="map-inspector" role="tooltip" aria-live="polite"></div>
         <div id="decision-hud"><b>AI Decision Log</b><span id="hud-msg">System initialised. Waiting for mission parameters...</span></div>
         <div class="map-overlay">
           <button class="map-btn" id="btn-newmap" aria-label="Generate new mission map">New Map</button>
@@ -1603,6 +1620,37 @@ window.addEventListener('load',()=>{
   addLog('7 hidden obstacles placed — revealed by LiDAR during traverse','i');
   addLog('Use [Plan A*] → [Start ▶] to begin simulation','i');
   addLog('Use Mission Setup tab to connect real backend API','i');
+
+  // Terrain Inspector Logic
+  const inspector = document.getElementById('map-inspector');
+  canvas.addEventListener('mousemove', (e) => {
+    const scaleX = canvas.width / (COLS * CELL);
+    const scaleY = canvas.height / (ROWS * CELL);
+    const scale = Math.min(scaleX, scaleY);
+    const offX = (canvas.width - COLS * CELL * scale) / 2;
+    const offY = (canvas.height - ROWS * CELL * scale) / 2;
+
+    const c = Math.floor((e.offsetX - offX) / (CELL * scale));
+    const r = Math.floor((e.offsetY - offY) / (CELL * scale));
+
+    if (r >= 0 && r < ROWS && c >= 0 && c < COLS) {
+      const cl = grid[r][c];
+      if (cl.rev || !layers.fog) {
+        inspector.style.display = 'block';
+        inspector.style.left = (e.pageX + 12) + 'px';
+        inspector.style.top = (e.pageY + 12) + 'px';
+        inspector.innerHTML = `
+          <b>GRID:</b> [${r}, ${c}]<br>
+          <b>ELEV:</b> ${cl.elev.toFixed(2)}m<br>
+          <b>SLOPE:</b> ${cl.slope.toFixed(2)}°<br>
+          <b>COST:</b> ${cl.cost >= 9000 ? '<span style="color:var(--red)">IMPASSABLE</span>' : cl.cost.toFixed(2)}
+        `;
+        return;
+      }
+    }
+    inspector.style.display = 'none';
+  });
+  canvas.addEventListener('mouseleave', () => inspector.style.display = 'none');
 
   requestAnimationFrame(loop);
 });
