@@ -196,6 +196,21 @@ html, body { height: 100%; background: var(--bg); color: var(--text); font-famil
 }
 #decision-hud b { display: block; margin-bottom: 4px; text-transform: uppercase; font-size: 9px; letter-spacing: 0.05em; }
 
+#map-inspector {
+  position: absolute;
+  background: rgba(10, 15, 25, 0.85);
+  border: 1px solid var(--accent);
+  border-radius: 3px;
+  padding: 6px 10px;
+  font-size: 10px;
+  color: var(--text);
+  pointer-events: none;
+  display: none;
+  z-index: 101;
+  white-space: pre;
+  box-shadow: 0 4px 10px rgba(0,0,0,0.4);
+}
+
 /* Misc */
 .section-hdr { font-size: 10px; letter-spacing: .06em; color: var(--accent); text-transform: uppercase;
   padding: 6px 0; border-bottom: 1px solid var(--border); margin-bottom: 10px; }
@@ -308,6 +323,7 @@ input[type=range] { width: 100%; accent-color: var(--accent); }
       <div id="map-wrap">
         <canvas id="mapCanvas"></canvas>
         <div id="decision-hud"><b>AI Decision Log</b><span id="hud-msg">System initialised. Waiting for mission parameters...</span></div>
+        <div id="map-inspector" role="tooltip" aria-live="polite"></div>
         <div class="map-overlay">
           <button class="map-btn" id="btn-newmap" aria-label="Generate new mission map">New Map</button>
           <button class="map-btn" id="btn-plan" aria-label="Compute global path using A*">Plan A*</button>
@@ -1591,6 +1607,39 @@ document.getElementById('btn-clear-log').addEventListener('click',()=>{
 window.addEventListener('load',()=>{
   canvas = document.getElementById('mapCanvas');
   ctx = canvas.getContext('2d');
+
+  // Terrain Inspector Hover logic
+  canvas.addEventListener('mousemove', (e) => {
+    const rect = canvas.getBoundingClientRect();
+    const mx = e.clientX - rect.left;
+    const my = e.clientY - rect.top;
+
+    const scaleX = canvas.width / (COLS * CELL), scaleY = canvas.height / (ROWS * CELL);
+    const scale = Math.min(scaleX, scaleY);
+    const offX = (canvas.width - COLS * CELL * scale) / 2;
+    const offY = (canvas.height - ROWS * CELL * scale) / 2;
+
+    const gx = (mx - offX) / scale;
+    const gy = (my - offY) / scale;
+    const c = Math.floor(gx / CELL), r = Math.floor(gy / CELL);
+
+    const insp = document.getElementById('map-inspector');
+    if (r >= 0 && r < ROWS && c >= 0 && c < COLS && grid[r] && grid[r][c]) {
+      const cl = grid[r][c];
+      insp.style.display = 'block';
+      insp.style.left = (e.clientX - rect.left + 15) + 'px';
+      insp.style.top = (e.clientY - rect.top + 15) + 'px';
+      insp.innerHTML = `<span style="color:var(--accent);font-weight:bold">Pos: [${r}, ${c}]</span>\n` +
+                       `Elev: ${cl.elev.toFixed(3)}m\n` +
+                       `Slope: ${cl.slope.toFixed(2)}°\n` +
+                       `Cost: ${cl.cost.toFixed(2)}`;
+    } else {
+      insp.style.display = 'none';
+    }
+  });
+  canvas.addEventListener('mouseleave', () => {
+    document.getElementById('map-inspector').style.display = 'none';
+  });
 
   genTerrain();
   buildAlgoCards();
