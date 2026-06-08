@@ -176,6 +176,27 @@ html, body { height: 100%; background: var(--bg); color: var(--text); font-famil
   outline-offset: 2px;
 }
 
+/* Terrain Inspector */
+#map-inspector {
+  position: absolute;
+  top: 150px;
+  left: 8px;
+  width: 180px;
+  background: rgba(10, 15, 25, 0.9);
+  border: 1px solid var(--border);
+  border-left: 3px solid var(--accent);
+  border-radius: 3px;
+  padding: 8px;
+  font-size: 10px;
+  color: var(--text);
+  pointer-events: none;
+  display: none;
+  z-index: 100;
+  box-shadow: 0 4px 12px rgba(0,0,0,0.5);
+}
+#map-inspector b { display: block; margin-bottom: 4px; text-transform: uppercase; font-size: 9px; letter-spacing: 0.05em; color: var(--accent); }
+#insp-content { line-height: 1.6; }
+
 /* Decision HUD */
 #decision-hud {
   position: absolute;
@@ -307,6 +328,7 @@ input[type=range] { width: 100%; accent-color: var(--accent); }
     <div class="pane active" id="pane-map">
       <div id="map-wrap">
         <canvas id="mapCanvas"></canvas>
+        <div id="map-inspector" role="tooltip"><b>Terrain Inspector</b><div id="insp-content">Hover over map for data</div></div>
         <div id="decision-hud"><b>AI Decision Log</b><span id="hud-msg">System initialised. Waiting for mission parameters...</span></div>
         <div class="map-overlay">
           <button class="map-btn" id="btn-newmap" aria-label="Generate new mission map">New Map</button>
@@ -1603,6 +1625,39 @@ window.addEventListener('load',()=>{
   addLog('7 hidden obstacles placed — revealed by LiDAR during traverse','i');
   addLog('Use [Plan A*] → [Start ▶] to begin simulation','i');
   addLog('Use Mission Setup tab to connect real backend API','i');
+
+  // Terrain Inspector mouse move
+  canvas.addEventListener('mousemove', (e) => {
+    const rect = canvas.getBoundingClientRect();
+    const cssScaleX = canvas.width / rect.width;
+    const cssScaleY = canvas.height / rect.height;
+
+    const scaleX = canvas.width / (COLS * CELL), scaleY = canvas.height / (ROWS * CELL);
+    const scale = Math.min(scaleX, scaleY);
+    const offX = (canvas.width - COLS * CELL * scale) / 2;
+    const offY = (canvas.height - ROWS * CELL * scale) / 2;
+
+    const mx = ((e.clientX - rect.left) * cssScaleX - offX) / scale;
+    const my = ((e.clientY - rect.top) * cssScaleY - offY) / scale;
+
+    const c = Math.floor(mx / CELL);
+    const r = Math.floor(my / CELL);
+
+    const insp = document.getElementById('map-inspector');
+    if (r >= 0 && r < ROWS && c >= 0 && c < COLS) {
+      const cell = grid[r][c];
+      const content = document.getElementById('insp-content');
+      insp.style.display = 'block';
+      content.innerHTML = `
+        Coord: [${r}, ${c}]<br>
+        Elev:  ${cell.elev.toFixed(3)} m<br>
+        Slope: ${cell.slope.toFixed(3)}°<br>
+        Cost:  ${cell.cost >= 9000 ? '<span style="color:var(--red)">IMPASSABLE</span>' : cell.cost.toFixed(2)}
+      `;
+    } else {
+      insp.style.display = 'none';
+    }
+  });
 
   requestAnimationFrame(loop);
 });
