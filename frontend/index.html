@@ -196,6 +196,22 @@ html, body { height: 100%; background: var(--bg); color: var(--text); font-famil
 }
 #decision-hud b { display: block; margin-bottom: 4px; text-transform: uppercase; font-size: 9px; letter-spacing: 0.05em; }
 
+#map-inspector {
+  position: absolute;
+  background: rgba(10, 12, 18, 0.9);
+  border: 1px solid var(--accent);
+  border-radius: 3px;
+  padding: 6px 8px;
+  font-size: 9px;
+  color: var(--text);
+  pointer-events: none;
+  z-index: 200;
+  box-shadow: 0 2px 8px rgba(0,0,0,0.6);
+  white-space: nowrap;
+}
+#map-inspector div { margin-bottom: 2px; }
+#map-inspector b { color: var(--accent); text-transform: uppercase; margin-right: 4px; }
+
 /* Misc */
 .section-hdr { font-size: 10px; letter-spacing: .06em; color: var(--accent); text-transform: uppercase;
   padding: 6px 0; border-bottom: 1px solid var(--border); margin-bottom: 10px; }
@@ -308,6 +324,7 @@ input[type=range] { width: 100%; accent-color: var(--accent); }
       <div id="map-wrap">
         <canvas id="mapCanvas"></canvas>
         <div id="decision-hud"><b>AI Decision Log</b><span id="hud-msg">System initialised. Waiting for mission parameters...</span></div>
+        <div id="map-inspector" role="tooltip" style="display:none"></div>
         <div class="map-overlay">
           <button class="map-btn" id="btn-newmap" aria-label="Generate new mission map">New Map</button>
           <button class="map-btn" id="btn-plan" aria-label="Compute global path using A*">Plan A*</button>
@@ -594,6 +611,7 @@ let apiBase = 'http://127.0.0.1:8000';
 let activeMissionId = null;
 let ws = null;
 let grid = [], path = null, replanPath = null, rrtNodes = null;
+let hoverCell = null;
 let pathIdx=0, rFrac=0, moving=false, paused=false;
 let phase='idle', failCount=0;
 let mTime=0, lastTs=0, speed=6;
@@ -1160,6 +1178,12 @@ function render(){
     ctx.restore();
   }
 
+  // Hover highlight
+  if(hoverCell){
+    ctx.strokeStyle='#00c8ff'; ctx.lineWidth=1;
+    ctx.strokeRect(hoverCell.c*CELL,hoverCell.r*CELL,CELL,CELL);
+  }
+
   ctx.restore();
 }
 
@@ -1591,6 +1615,46 @@ document.getElementById('btn-clear-log').addEventListener('click',()=>{
 window.addEventListener('load',()=>{
   canvas = document.getElementById('mapCanvas');
   ctx = canvas.getContext('2d');
+
+  canvas.addEventListener('mousemove', (e) => {
+    const rect = canvas.getBoundingClientRect();
+    const mx = (e.clientX - rect.left) * (canvas.width / rect.width);
+    const my = (e.clientY - rect.top) * (canvas.height / rect.height);
+
+    const scaleX = canvas.width / (COLS * CELL), scaleY = canvas.height / (ROWS * CELL);
+    const scale = Math.min(scaleX, scaleY);
+    const offX = (canvas.width - COLS * CELL * scale) / 2;
+    const offY = (canvas.height - ROWS * CELL * scale) / 2;
+
+    const c = Math.floor((mx - offX) / (scale * CELL));
+    const r = Math.floor((my - offY) / (scale * CELL));
+
+    if (grid[r] && grid[r][c]) {
+      hoverCell = {r, c};
+      const cl = grid[r][c];
+      const insp = document.getElementById('map-inspector');
+      insp.style.display = 'block';
+      insp.style.left = (e.clientX - rect.left + 15) + 'px';
+      insp.style.top = (e.clientY - rect.top + 15) + 'px';
+      insp.innerHTML = `
+        <div><b>POS:</b> ${r},${c}</div>
+        <div><b>ELEV:</b> ${cl.elev.toFixed(3)}m</div>
+        <div><b>SLOPE:</b> ${(cl.slope * 100).toFixed(1)}%</div>
+        <div><b>COST:</b> ${cl.cost >= 9000 ? 'IMPASSABLE' : cl.cost.toFixed(2)}</div>
+        ${cl.crater ? '<div style="color:var(--red)">CRATER DETECTED</div>' : ''}
+        ${cl.hidden && cl.rev ? '<div style="color:var(--orange)">HIDDEN OBSTACLE</div>' : ''}
+        ${cl.mineral > 0.15 ? `<div style="color:var(--accent)">MINERAL: ${(cl.mineral * 100).toFixed(1)}%</div>` : ''}
+      `;
+    } else {
+      hoverCell = null;
+      document.getElementById('map-inspector').style.display = 'none';
+    }
+  });
+
+  canvas.addEventListener('mouseleave', () => {
+    hoverCell = null;
+    document.getElementById('map-inspector').style.display = 'none';
+  });
 
   genTerrain();
   buildAlgoCards();
