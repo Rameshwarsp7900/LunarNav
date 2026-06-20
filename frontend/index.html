@@ -196,6 +196,23 @@ html, body { height: 100%; background: var(--bg); color: var(--text); font-famil
 }
 #decision-hud b { display: block; margin-bottom: 4px; text-transform: uppercase; font-size: 9px; letter-spacing: 0.05em; }
 
+#map-inspector {
+  position: absolute;
+  pointer-events: none;
+  background: rgba(10, 15, 25, 0.9);
+  border: 1px solid var(--accent);
+  border-radius: 2px;
+  padding: 8px;
+  font-size: 9px;
+  color: var(--text);
+  z-index: 200;
+  display: none;
+  box-shadow: 0 4px 15px rgba(0,0,0,0.6);
+  min-width: 120px;
+}
+#map-inspector div { margin-bottom: 3px; display: flex; justify-content: space-between; }
+#map-inspector b { color: var(--accent); margin-right: 8px; }
+
 /* Misc */
 .section-hdr { font-size: 10px; letter-spacing: .06em; color: var(--accent); text-transform: uppercase;
   padding: 6px 0; border-bottom: 1px solid var(--border); margin-bottom: 10px; }
@@ -306,7 +323,8 @@ input[type=range] { width: 100%; accent-color: var(--accent); }
     <!-- ① Terrain Map ───────────────────────────────────────────────────── -->
     <div class="pane active" id="pane-map">
       <div id="map-wrap">
-        <canvas id="mapCanvas"></canvas>
+        <canvas id="mapCanvas" aria-label="Interactive terrain map. Hover for detailed data."></canvas>
+        <div id="map-inspector" role="tooltip" aria-live="polite"></div>
         <div id="decision-hud"><b>AI Decision Log</b><span id="hud-msg">System initialised. Waiting for mission parameters...</span></div>
         <div class="map-overlay">
           <button class="map-btn" id="btn-newmap" aria-label="Generate new mission map">New Map</button>
@@ -1603,6 +1621,44 @@ window.addEventListener('load',()=>{
   addLog('7 hidden obstacles placed — revealed by LiDAR during traverse','i');
   addLog('Use [Plan A*] → [Start ▶] to begin simulation','i');
   addLog('Use Mission Setup tab to connect real backend API','i');
+
+  const inspector = document.getElementById('map-inspector');
+  canvas.addEventListener('mousemove', (e) => {
+    const rect = canvas.getBoundingClientRect();
+    const mx = (e.clientX - rect.left) * (canvas.width / rect.width);
+    const my = (e.clientY - rect.top) * (canvas.height / rect.height);
+
+    const scaleX = canvas.width / (COLS * CELL), scaleY = canvas.height / (ROWS * CELL);
+    const scale = Math.min(scaleX, scaleY);
+    const offX = (canvas.width - COLS * CELL * scale) / 2;
+    const offY = (canvas.height - ROWS * CELL * scale) / 2;
+
+    const gx = Math.floor((mx - offX) / (scale * CELL));
+    const gy = Math.floor((my - offY) / (scale * CELL));
+
+    if (grid[gy] && grid[gy][gx]) {
+      const cell = grid[gy][gx];
+      inspector.style.display = 'block';
+      inspector.style.left = `${e.clientX - rect.left + 15}px`;
+      inspector.style.top = `${e.clientY - rect.top + 15}px`;
+
+      const terrainType = cell.crater ? 'Crater' : (cell.hidden && cell.rev) ? 'Detected Obstacle' : cell.slope > 0.25 ? 'High Slope' : 'Stable Regolith';
+
+      inspector.innerHTML = `
+        <div><b>Coord</b> <span>${gx}, ${gy}</span></div>
+        <div><b>Elev</b> <span>${(cell.elev * 100).toFixed(1)}m</span></div>
+        <div><b>Slope</b> <span>${(cell.slope * 10).toFixed(1)}°</span></div>
+        <div><b>Cost</b> <span>${cell.cost.toFixed(2)}</span></div>
+        <div><b>Type</b> <span>${terrainType}</span></div>
+      `;
+    } else {
+      inspector.style.display = 'none';
+    }
+  });
+
+  canvas.addEventListener('mouseleave', () => {
+    inspector.style.display = 'none';
+  });
 
   requestAnimationFrame(loop);
 });
