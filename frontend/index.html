@@ -196,6 +196,25 @@ html, body { height: 100%; background: var(--bg); color: var(--text); font-famil
 }
 #decision-hud b { display: block; margin-bottom: 4px; text-transform: uppercase; font-size: 9px; letter-spacing: 0.05em; }
 
+/* Terrain Inspector */
+#map-inspector {
+  position: absolute;
+  background: rgba(10, 12, 18, 0.95);
+  border: 1px solid var(--accent);
+  border-radius: 4px;
+  padding: 8px 10px;
+  font-size: 10px;
+  color: var(--text);
+  pointer-events: none;
+  display: none;
+  z-index: 200;
+  box-shadow: 0 4px 12px rgba(0,0,0,0.5);
+}
+#map-inspector b { display: block; margin-bottom: 4px; text-transform: uppercase; font-size: 9px; color: var(--accent); }
+#map-inspector div { display: flex; justify-content: space-between; gap: 16px; margin-bottom: 2px; }
+#map-inspector .k { color: var(--muted); }
+#map-inspector .v { color: var(--text); font-weight: bold; }
+
 /* Misc */
 .section-hdr { font-size: 10px; letter-spacing: .06em; color: var(--accent); text-transform: uppercase;
   padding: 6px 0; border-bottom: 1px solid var(--border); margin-bottom: 10px; }
@@ -306,8 +325,9 @@ input[type=range] { width: 100%; accent-color: var(--accent); }
     <!-- ① Terrain Map ───────────────────────────────────────────────────── -->
     <div class="pane active" id="pane-map">
       <div id="map-wrap">
-        <canvas id="mapCanvas"></canvas>
+        <canvas id="mapCanvas" aria-label="Interactive terrain map. Hover to inspect data." tabindex="0"></canvas>
         <div id="decision-hud"><b>AI Decision Log</b><span id="hud-msg">System initialised. Waiting for mission parameters...</span></div>
+        <div id="map-inspector" role="tooltip" aria-live="polite"></div>
         <div class="map-overlay">
           <button class="map-btn" id="btn-newmap" aria-label="Generate new mission map">New Map</button>
           <button class="map-btn" id="btn-plan" aria-label="Compute global path using A*">Plan A*</button>
@@ -594,6 +614,7 @@ let apiBase = 'http://127.0.0.1:8000';
 let activeMissionId = null;
 let ws = null;
 let grid = [], path = null, replanPath = null, rrtNodes = null;
+let vCursor = {r:32, c:50, active:false};
 let pathIdx=0, rFrac=0, moving=false, paused=false;
 let phase='idle', failCount=0;
 let mTime=0, lastTs=0, speed=6;
@@ -1160,6 +1181,12 @@ function render(){
     ctx.restore();
   }
 
+  // Virtual Cursor (Accessibility)
+  if(vCursor.active){
+    ctx.strokeStyle='#00c8ff'; ctx.lineWidth=2;
+    ctx.strokeRect(vCursor.c*CELL, vCursor.r*CELL, CELL, CELL);
+  }
+
   ctx.restore();
 }
 
@@ -1603,6 +1630,57 @@ window.addEventListener('load',()=>{
   addLog('7 hidden obstacles placed — revealed by LiDAR during traverse','i');
   addLog('Use [Plan A*] → [Start ▶] to begin simulation','i');
   addLog('Use Mission Setup tab to connect real backend API','i');
+
+  // Terrain Inspector Interaction
+  function updateInspector(r, c, x, y) {
+    const inspector = document.getElementById('map-inspector');
+    if (r >= 0 && r < ROWS && c >= 0 && c < COLS && grid[r] && grid[r][c]) {
+      const cl = grid[r][c];
+      const type = cl.crater ? 'Crater (Impassable)' :
+                   (cl.hidden && cl.rev) ? 'Hidden Hazard' :
+                   (cl.mineral > 0.5) ? 'Mineral Deposit' :
+                   (cl.slope > 0.25) ? 'High Slope' : 'Basaltic Plain';
+
+      inspector.style.display = 'block';
+      inspector.style.left = (x + 15) + 'px';
+      inspector.style.top = (y + 15) + 'px';
+      inspector.innerHTML = `
+        <b>Terrain Data [${r},${c}]</b>
+        <div><span class="k">Elevation:</span><span class="v">${(cl.elev * 100).toFixed(1)}m</span></div>
+        <div><span class="k">Slope:</span><span class="v">${(cl.slope * 45).toFixed(1)}°</span></div>
+        <div><span class="k">Cost:</span><span class="v">${cl.cost >= 9000 ? 'INF' : cl.cost.toFixed(2)}</span></div>
+        <div><span class="k">Classification:</span><span class="v" style="color:var(--accent)">${type}</span></div>
+      `;
+    } else { inspector.style.display = 'none'; }
+  }
+
+  canvas.addEventListener('mousemove', e => {
+    vCursor.active = false;
+    const rect = canvas.getBoundingClientRect();
+    const mx = (e.clientX - rect.left) * (canvas.width / rect.width);
+    const my = (e.clientY - rect.top) * (canvas.height / rect.height);
+    const scale = Math.min(canvas.width/(COLS*CELL), canvas.height/(ROWS*CELL));
+    const offX = (canvas.width - COLS*CELL*scale)/2, offY = (canvas.height - ROWS*CELL*scale)/2;
+    const c = Math.floor((mx - offX) / (scale * CELL)), r = Math.floor((my - offY) / (scale * CELL));
+    updateInspector(r, c, e.clientX - rect.left, e.clientY - rect.top);
+  });
+
+  canvas.addEventListener('mouseleave', () => { if(!vCursor.active) document.getElementById('map-inspector').style.display = 'none'; });
+
+  canvas.addEventListener('keydown', e => {
+    if(!['ArrowUp','ArrowDown','ArrowLeft','ArrowRight'].includes(e.key)) return;
+    e.preventDefault(); vCursor.active = true;
+    if(e.key === 'ArrowUp') vCursor.r = Math.max(0, vCursor.r - 1);
+    if(e.key === 'ArrowDown') vCursor.r = Math.min(ROWS - 1, vCursor.r + 1);
+    if(e.key === 'ArrowLeft') vCursor.c = Math.max(0, vCursor.c - 1);
+    if(e.key === 'ArrowRight') vCursor.c = Math.min(COLS - 1, vCursor.c + 1);
+
+    const scale = Math.min(canvas.width/(COLS*CELL), canvas.height/(ROWS*CELL));
+    const offX = (canvas.width - COLS*CELL*scale)/2, offY = (canvas.height - ROWS*CELL*scale)/2;
+    const x = (vCursor.c * CELL + CELL/2) * scale + offX;
+    const y = (vCursor.r * CELL + CELL/2) * scale + offY;
+    updateInspector(vCursor.r, vCursor.c, x, y);
+  });
 
   requestAnimationFrame(loop);
 });
