@@ -196,6 +196,23 @@ html, body { height: 100%; background: var(--bg); color: var(--text); font-famil
 }
 #decision-hud b { display: block; margin-bottom: 4px; text-transform: uppercase; font-size: 9px; letter-spacing: 0.05em; }
 
+/* Terrain Inspector Tooltip */
+#map-inspector {
+  position: absolute;
+  background: rgba(10, 15, 25, 0.9);
+  border: 1px solid var(--accent);
+  border-radius: 4px;
+  padding: 8px;
+  font-size: 9px;
+  color: #fff;
+  pointer-events: none;
+  display: none;
+  z-index: 200;
+  box-shadow: 0 4px 15px rgba(0,0,0,0.6);
+  white-space: pre-line;
+  min-width: 120px;
+}
+
 /* Misc */
 .section-hdr { font-size: 10px; letter-spacing: .06em; color: var(--accent); text-transform: uppercase;
   padding: 6px 0; border-bottom: 1px solid var(--border); margin-bottom: 10px; }
@@ -306,7 +323,8 @@ input[type=range] { width: 100%; accent-color: var(--accent); }
     <!-- ① Terrain Map ───────────────────────────────────────────────────── -->
     <div class="pane active" id="pane-map">
       <div id="map-wrap">
-        <canvas id="mapCanvas"></canvas>
+        <canvas id="mapCanvas" tabindex="0" aria-label="Interactive lunar terrain map. Use mouse or Arrow Keys to inspect terrain."></canvas>
+        <div id="map-inspector" role="tooltip" aria-live="polite"></div>
         <div id="decision-hud"><b>AI Decision Log</b><span id="hud-msg">System initialised. Waiting for mission parameters...</span></div>
         <div class="map-overlay">
           <button class="map-btn" id="btn-newmap" aria-label="Generate new mission map">New Map</button>
@@ -602,6 +620,7 @@ let terrainCache = null;
 let manualObstacles = [];
 let layers = {terrain:true,crater:true,mineral:true,slope:true,path:true,'lidar-r':true,fog:true};
 let startP={r:32,c:3}, goalP={r:32,c:96};
+let vCursor = {r:32, c:3, active:false};
 
 // ═══════════════════════════════════════════════════════════════════════════════
 // Utilities
@@ -1160,6 +1179,13 @@ function render(){
     ctx.restore();
   }
 
+  // Virtual Cursor
+  if (vCursor.active) {
+    ctx.strokeStyle = '#00c8ff';
+    ctx.lineWidth = 2;
+    ctx.strokeRect(vCursor.c * CELL, vCursor.r * CELL, CELL, CELL);
+  }
+
   ctx.restore();
 }
 
@@ -1591,6 +1617,69 @@ document.getElementById('btn-clear-log').addEventListener('click',()=>{
 window.addEventListener('load',()=>{
   canvas = document.getElementById('mapCanvas');
   ctx = canvas.getContext('2d');
+
+  // Inspector logic
+  canvas.addEventListener('mousemove', e => {
+    const rect = canvas.getBoundingClientRect();
+    const scaleX = canvas.width / (COLS * CELL);
+    const scaleY = canvas.height / (ROWS * CELL);
+    const scale = Math.min(canvas.width / (COLS * CELL), canvas.height / (ROWS * CELL));
+    const offX = (canvas.width - COLS * CELL * scale) / 2;
+    const offY = (canvas.height - ROWS * CELL * scale) / 2;
+
+    const mx = (e.clientX - rect.left) * (canvas.width / rect.width);
+    const my = (e.clientY - rect.top) * (canvas.height / rect.height);
+
+    const c = Math.floor((mx - offX) / (CELL * scale));
+    const r = Math.floor((my - offY) / (CELL * scale));
+
+    if (r >= 0 && r < ROWS && c >= 0 && c < COLS && grid[r] && grid[r][c]) {
+      vCursor = { r, c, active: true };
+      const cell = grid[r][c];
+      const ins = document.getElementById('map-inspector');
+      ins.style.display = 'block';
+      ins.style.left = `${e.clientX - rect.left + 15}px`;
+      ins.style.top = `${e.clientY - rect.top + 15}px`;
+      ins.innerHTML = `<b>Terrain Cell (${r}, ${c})</b>
+        Elevation: ${cell.elev.toFixed(3)}m
+        Slope: ${(cell.slope * 45).toFixed(1)}°
+        Cost: ${cell.cost.toFixed(2)}
+        Type: ${cell.crater ? 'Crater' : cell.hidden && cell.rev ? 'Hazard' : cell.slope > 0.4 ? 'Rough' : 'Stable'}`;
+    } else {
+      vCursor.active = false;
+      document.getElementById('map-inspector').style.display = 'none';
+    }
+  });
+
+  canvas.addEventListener('mouseleave', () => {
+    vCursor.active = false;
+    document.getElementById('map-inspector').style.display = 'none';
+  });
+
+  canvas.addEventListener('keydown', e => {
+    if (!['ArrowUp', 'ArrowDown', 'ArrowLeft', 'ArrowRight'].includes(e.key)) return;
+    e.preventDefault();
+    vCursor.active = true;
+    if (e.key === 'ArrowUp') vCursor.r = clamp(vCursor.r - 1, 0, ROWS - 1);
+    if (e.key === 'ArrowDown') vCursor.r = clamp(vCursor.r + 1, 0, ROWS - 1);
+    if (e.key === 'ArrowLeft') vCursor.c = clamp(vCursor.c - 1, 0, COLS - 1);
+    if (e.key === 'ArrowRight') vCursor.c = clamp(vCursor.c + 1, 0, COLS - 1);
+
+    const cell = grid[vCursor.r][vCursor.c];
+    const ins = document.getElementById('map-inspector');
+    const scale = Math.min(canvas.width / (COLS * CELL), canvas.height / (ROWS * CELL));
+    const offX = (canvas.width - COLS * CELL * scale) / 2;
+    const offY = (canvas.height - ROWS * CELL * scale) / 2;
+
+    ins.style.display = 'block';
+    ins.style.left = `${offX + vCursor.c * CELL * scale + 20}px`;
+    ins.style.top = `${offY + vCursor.r * CELL * scale + 20}px`;
+    ins.innerHTML = `<b>Terrain Cell (${vCursor.r}, ${vCursor.c}) [Keyboard]</b>
+      Elevation: ${cell.elev.toFixed(3)}m
+      Slope: ${(cell.slope * 45).toFixed(1)}°
+      Cost: ${cell.cost.toFixed(2)}
+      Type: ${cell.crater ? 'Crater' : cell.hidden && cell.rev ? 'Hazard' : cell.slope > 0.4 ? 'Rough' : 'Stable'}`;
+  });
 
   genTerrain();
   buildAlgoCards();
