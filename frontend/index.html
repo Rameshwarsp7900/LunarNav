@@ -195,6 +195,8 @@ html, body { height: 100%; background: var(--bg); color: var(--text); font-famil
   z-index: 100;
 }
 #decision-hud b { display: block; margin-bottom: 4px; text-transform: uppercase; font-size: 9px; letter-spacing: 0.05em; }
+#map-inspector { position: absolute; background: rgba(10,15,25,.9); border: 1px solid var(--accent); padding: 6px; border-radius: 4px; pointer-events: none; display: none; z-index: 200; font-size: 10px; color: var(--text); min-width: 120px; }
+#map-inspector b { color: var(--accent); display: block; margin-bottom: 3px; border-bottom: 1px solid var(--border); }
 
 /* Misc */
 .section-hdr { font-size: 10px; letter-spacing: .06em; color: var(--accent); text-transform: uppercase;
@@ -306,7 +308,8 @@ input[type=range] { width: 100%; accent-color: var(--accent); }
     <!-- ① Terrain Map ───────────────────────────────────────────────────── -->
     <div class="pane active" id="pane-map">
       <div id="map-wrap">
-        <canvas id="mapCanvas"></canvas>
+        <canvas id="mapCanvas" tabindex="0" role="img" aria-label="Terrain map. Hover or use arrows to inspect."></canvas>
+        <div id="map-inspector" role="tooltip" aria-live="polite"></div>
         <div id="decision-hud"><b>AI Decision Log</b><span id="hud-msg">System initialised. Waiting for mission parameters...</span></div>
         <div class="map-overlay">
           <button class="map-btn" id="btn-newmap" aria-label="Generate new mission map">New Map</button>
@@ -594,6 +597,7 @@ let apiBase = 'http://127.0.0.1:8000';
 let activeMissionId = null;
 let ws = null;
 let grid = [], path = null, replanPath = null, rrtNodes = null;
+let vCursor = { r: 0, c: 0, active: false };
 let pathIdx=0, rFrac=0, moving=false, paused=false;
 let phase='idle', failCount=0;
 let mTime=0, lastTs=0, speed=6;
@@ -1096,6 +1100,7 @@ function render(){
   ctx.scale(scale,scale);
 
   ctx.drawImage(terrainCache,0,0);
+  if (vCursor.active) { ctx.strokeStyle='#00c8ff'; ctx.lineWidth=2; ctx.strokeRect(vCursor.c*CELL, vCursor.r*CELL, CELL, CELL); }
 
   // RRT* tree
   if(rrtNodes&&rrtNodes.length>0&&phase==='rrt'){
@@ -1591,6 +1596,36 @@ document.getElementById('btn-clear-log').addEventListener('click',()=>{
 window.addEventListener('load',()=>{
   canvas = document.getElementById('mapCanvas');
   ctx = canvas.getContext('2d');
+
+  canvas.onmousemove = (e) => {
+    const rct = canvas.getBoundingClientRect(), s = Math.min(canvas.width/(COLS*CELL), canvas.height/(ROWS*CELL)),
+          ox = (canvas.width-COLS*CELL*s)/2, oy = (canvas.height-ROWS*CELL*s)/2,
+          c = Math.floor(((e.clientX-rct.left)*(canvas.width/rct.width)-ox)/s/CELL),
+          r = Math.floor(((e.clientY-rct.top)*(canvas.height/rct.height)-oy)/s/CELL);
+    const ins = document.getElementById('map-inspector'), wrap = document.getElementById('map-wrap').getBoundingClientRect();
+    if (grid[r] && grid[r][c]) {
+      vCursor = { r, c, active: true }; ins.style.display = 'block';
+      ins.style.left = (e.clientX-wrap.left+15)+'px'; ins.style.top = (e.clientY-wrap.top+15)+'px';
+      const cl = grid[r][c]; ins.innerHTML = `<b>Inspector [${r},${c}]</b>Elev: ${(cl.elev*100).toFixed(1)}m<br>Slope: ${(cl.slope*100).toFixed(1)}°<br>Cost: ${cl.cost.toFixed(2)}`;
+    } else { vCursor.active = false; ins.style.display = 'none'; }
+  };
+  canvas.onmouseleave = () => { vCursor.active = false; document.getElementById('map-inspector').style.display = 'none'; };
+  canvas.onkeydown = (e) => {
+    let { r, c } = vCursor;
+    if (!vCursor.active) { r = ROWS/2; c = COLS/2; }
+    if (e.key === 'ArrowUp') r--; else if (e.key === 'ArrowDown') r++;
+    else if (e.key === 'ArrowLeft') c--; else if (e.key === 'ArrowRight') c++;
+    else return;
+    vCursor = { r: clamp(r, 0, ROWS-1), c: clamp(c, 0, COLS-1), active: true };
+    const ins = document.getElementById('map-inspector'), wrap = document.getElementById('map-wrap').getBoundingClientRect(),
+          rct = canvas.getBoundingClientRect(), s = Math.min(canvas.width/(COLS*CELL), canvas.height/(ROWS*CELL)),
+          ox = (canvas.width-COLS*CELL*s)/2, oy = (canvas.height-ROWS*CELL*s)/2,
+          x = (ox + (vCursor.c*CELL+CELL/2)*s) / (canvas.width/rct.width) + rct.left - wrap.left,
+          y = (oy + (vCursor.r*CELL+CELL/2)*s) / (canvas.height/rct.height) + rct.top - wrap.top;
+    ins.style.display = 'block'; ins.style.left = x+'px'; ins.style.top = y+'px';
+    const cl = grid[vCursor.r][vCursor.c]; ins.innerHTML = `<b>Inspector [${vCursor.r},${vCursor.c}]</b>Elev: ${(cl.elev*100).toFixed(1)}m<br>Slope: ${(cl.slope*100).toFixed(1)}°<br>Cost: ${cl.cost.toFixed(2)}`;
+    e.preventDefault();
+  };
 
   genTerrain();
   buildAlgoCards();
