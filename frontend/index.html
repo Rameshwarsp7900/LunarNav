@@ -176,6 +176,22 @@ html, body { height: 100%; background: var(--bg); color: var(--text); font-famil
   outline-offset: 2px;
 }
 
+#map-inspector {
+  position: absolute;
+  background: rgba(10, 12, 18, 0.9);
+  border: 1px solid var(--border);
+  padding: 6px 10px;
+  font-size: 9px;
+  color: var(--text);
+  pointer-events: none;
+  display: none;
+  z-index: 200;
+  border-radius: 3px;
+  box-shadow: 0 2px 8px rgba(0,0,0,0.6);
+  white-space: pre;
+}
+#map-inspector b { color: var(--accent); }
+
 /* Decision HUD */
 #decision-hud {
   position: absolute;
@@ -307,6 +323,7 @@ input[type=range] { width: 100%; accent-color: var(--accent); }
     <div class="pane active" id="pane-map">
       <div id="map-wrap">
         <canvas id="mapCanvas"></canvas>
+        <div id="map-inspector" role="tooltip" aria-live="polite"></div>
         <div id="decision-hud"><b>AI Decision Log</b><span id="hud-msg">System initialised. Waiting for mission parameters...</span></div>
         <div class="map-overlay">
           <button class="map-btn" id="btn-newmap" aria-label="Generate new mission map">New Map</button>
@@ -1591,6 +1608,39 @@ document.getElementById('btn-clear-log').addEventListener('click',()=>{
 window.addEventListener('load',()=>{
   canvas = document.getElementById('mapCanvas');
   ctx = canvas.getContext('2d');
+
+  canvas.addEventListener('mousemove', e => {
+    const rect = canvas.getBoundingClientRect();
+    const mx = e.clientX - rect.left;
+    const my = e.clientY - rect.top;
+
+    const scaleX = canvas.width / (COLS * CELL);
+    const scaleY = canvas.height / (ROWS * CELL);
+    const scale = Math.min(scaleX, scaleY);
+    const offX = (canvas.width - COLS * CELL * scale) / 2;
+    const offY = (canvas.height - ROWS * CELL * scale) / 2;
+
+    const gridX = (mx - offX) / scale / CELL;
+    const gridY = (my - offY) / scale / CELL;
+    const c = Math.floor(gridX);
+    const r = Math.floor(gridY);
+
+    const inspector = document.getElementById('map-inspector');
+    if (r >= 0 && r < ROWS && c >= 0 && c < COLS && grid[r] && grid[r][c]) {
+      const cl = grid[r][c];
+      const type = cl.crater ? 'Crater' : (cl.hidden && cl.rev) ? 'Hidden Hazard' : 'Regolith';
+      inspector.style.display = 'block';
+      inspector.style.left = (mx + 15) + 'px';
+      inspector.style.top = (my + 15) + 'px';
+      inspector.innerHTML = `<b>Terrain Inspector</b>\nCoord: [${r}, ${c}]\nElev:  ${cl.elev.toFixed(3)}m\nSlope: ${cl.slope.toFixed(2)}°\nCost:  ${cl.cost >= 9000 ? 'INF' : cl.cost.toFixed(2)}\nType:  ${type}`;
+    } else {
+      inspector.style.display = 'none';
+    }
+  });
+
+  canvas.addEventListener('mouseleave', () => {
+    document.getElementById('map-inspector').style.display = 'none';
+  });
 
   genTerrain();
   buildAlgoCards();
