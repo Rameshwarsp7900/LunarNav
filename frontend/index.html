@@ -171,12 +171,12 @@ html, body { height: 100%; background: var(--bg); color: var(--text); font-famil
   filter: grayscale(0.5);
   pointer-events: none;
 }
-.ctrl-btn:focus-visible, .map-btn:focus-visible, .tab:focus-visible {
+.ctrl-btn:focus-visible, .map-btn:focus-visible, .tab:focus-visible, #mapCanvas:focus-visible {
   outline: 2px solid var(--accent);
   outline-offset: 2px;
 }
 
-/* Decision HUD */
+/* Decision HUD & Inspector */
 #decision-hud {
   position: absolute;
   top: 8px;
@@ -195,6 +195,22 @@ html, body { height: 100%; background: var(--bg); color: var(--text); font-famil
   z-index: 100;
 }
 #decision-hud b { display: block; margin-bottom: 4px; text-transform: uppercase; font-size: 9px; letter-spacing: 0.05em; }
+
+#map-inspector {
+  position: absolute;
+  background: rgba(10, 12, 18, 0.95);
+  border: 1px solid var(--border);
+  padding: 8px;
+  border-radius: 4px;
+  pointer-events: none;
+  z-index: 200;
+  display: none;
+  font-size: 10px;
+  min-width: 140px;
+  box-shadow: 0 4px 12px rgba(0,0,0,0.5);
+}
+#map-inspector .val { color: var(--accent); float: right; }
+#map-inspector div { border-bottom: 1px solid rgba(255,255,255,0.05); padding: 2px 0; }
 
 /* Misc */
 .section-hdr { font-size: 10px; letter-spacing: .06em; color: var(--accent); text-transform: uppercase;
@@ -306,7 +322,8 @@ input[type=range] { width: 100%; accent-color: var(--accent); }
     <!-- ① Terrain Map ───────────────────────────────────────────────────── -->
     <div class="pane active" id="pane-map">
       <div id="map-wrap">
-        <canvas id="mapCanvas"></canvas>
+        <canvas id="mapCanvas" aria-label="Lunar terrain map. Use mouse to inspect grid data." tabindex="0"></canvas>
+        <div id="map-inspector" role="tooltip" aria-live="polite"></div>
         <div id="decision-hud"><b>AI Decision Log</b><span id="hud-msg">System initialised. Waiting for mission parameters...</span></div>
         <div class="map-overlay">
           <button class="map-btn" id="btn-newmap" aria-label="Generate new mission map">New Map</button>
@@ -1591,6 +1608,41 @@ document.getElementById('btn-clear-log').addEventListener('click',()=>{
 window.addEventListener('load',()=>{
   canvas = document.getElementById('mapCanvas');
   ctx = canvas.getContext('2d');
+
+  const inspector = document.getElementById('map-inspector');
+  canvas.addEventListener('mousemove', (e) => {
+    const rect = canvas.getBoundingClientRect();
+    const mx = (e.clientX - rect.left) * (canvas.width / rect.width);
+    const my = (e.clientY - rect.top) * (canvas.height / rect.height);
+
+    const scaleX = canvas.width / (COLS * CELL), scaleY = canvas.height / (ROWS * CELL);
+    const scale = Math.min(scaleX, scaleY);
+    const offX = (canvas.width - COLS * CELL * scale) / 2;
+    const offY = (canvas.height - ROWS * CELL * scale) / 2;
+
+    const c = Math.floor((mx - offX) / (CELL * scale));
+    const r = Math.floor((my - offY) / (CELL * scale));
+
+    if (grid[r] && grid[r][c]) {
+      const cl = grid[r][c];
+      const type = cl.crater ? 'Crater' : (cl.hidden && cl.rev) ? 'Hazard' : cl.slope > 0.25 ? 'High Slope' : 'Stable';
+      inspector.innerHTML = `
+        <div style="color:var(--accent);font-weight:bold;margin-bottom:4px">TERRAIN INSPECTOR</div>
+        <div>Coord <span class="val">${r},${c}</span></div>
+        <div>Elev <span class="val">${cl.elev.toFixed(3)}m</span></div>
+        <div>Slope <span class="val">${(cl.slope * 90).toFixed(1)}°</span></div>
+        <div>Cost <span class="val">${cl.cost >= 9000 ? 'INF' : cl.cost.toFixed(2)}</span></div>
+        <div>Type <span class="val">${type}</span></div>
+      `;
+      inspector.style.display = 'block';
+      const wrapRect = document.getElementById('map-wrap').getBoundingClientRect();
+      inspector.style.left = (e.clientX - wrapRect.left + 15) + 'px';
+      inspector.style.top = (e.clientY - wrapRect.top + 15) + 'px';
+    } else {
+      inspector.style.display = 'none';
+    }
+  });
+  canvas.addEventListener('mouseleave', () => inspector.style.display = 'none');
 
   genTerrain();
   buildAlgoCards();
