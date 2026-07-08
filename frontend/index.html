@@ -204,6 +204,24 @@ html, body { height: 100%; background: var(--bg); color: var(--text); font-famil
 .info-row .k { color: var(--muted); }
 .info-row .v { color: var(--text); }
 input[type=range] { width: 100%; accent-color: var(--accent); }
+
+/* Terrain Inspector */
+#map-inspector {
+  position: absolute;
+  background: rgba(10, 15, 25, 0.92);
+  border: 1px solid var(--accent);
+  border-radius: 3px;
+  padding: 8px;
+  pointer-events: none;
+  z-index: 200;
+  display: none;
+  font-size: 9px;
+  color: var(--text);
+  box-shadow: 0 4px 12px rgba(0,0,0,0.5);
+  min-width: 140px;
+}
+#map-inspector div { display: flex; justify-content: space-between; gap: 10px; margin-bottom: 2px; }
+#map-inspector b { color: var(--accent); text-transform: uppercase; font-weight: normal; }
 </style>
 </head>
 <body>
@@ -307,6 +325,7 @@ input[type=range] { width: 100%; accent-color: var(--accent); }
     <div class="pane active" id="pane-map">
       <div id="map-wrap">
         <canvas id="mapCanvas"></canvas>
+        <div id="map-inspector" role="tooltip" aria-live="polite"></div>
         <div id="decision-hud"><b>AI Decision Log</b><span id="hud-msg">System initialised. Waiting for mission parameters...</span></div>
         <div class="map-overlay">
           <button class="map-btn" id="btn-newmap" aria-label="Generate new mission map">New Map</button>
@@ -1591,6 +1610,40 @@ document.getElementById('btn-clear-log').addEventListener('click',()=>{
 window.addEventListener('load',()=>{
   canvas = document.getElementById('mapCanvas');
   ctx = canvas.getContext('2d');
+
+  const inspector = document.getElementById('map-inspector');
+  canvas.addEventListener('mousemove', e => {
+    const rect = canvas.getBoundingClientRect();
+    const scaleX = canvas.width / (COLS * CELL);
+    const scaleY = canvas.height / (ROWS * CELL);
+    const scale = Math.min(scaleX, scaleY);
+    const offX = (canvas.width - COLS * CELL * scale) / 2;
+    const offY = (canvas.height - ROWS * CELL * scale) / 2;
+
+    const mx = (e.clientX - rect.left) * (canvas.width / rect.width);
+    const my = (e.clientY - rect.top) * (canvas.height / rect.height);
+    const gx = (mx - offX) / (scale * CELL);
+    const gy = (my - offY) / (scale * CELL);
+
+    const c = Math.floor(gx), r = Math.floor(gy);
+    if (grid[r] && grid[r][c]) {
+      const cell = grid[r][c];
+      const type = cell.crater ? 'Crater' : (cell.hidden && cell.rev) ? 'Hazard' : cell.slope > 0.25 ? 'High Slope' : cell.mineral > 0.5 ? 'Mineral' : 'Stable';
+      inspector.style.display = 'block';
+      inspector.style.left = (e.clientX - rect.left + 15) + 'px';
+      inspector.style.top = (e.clientY - rect.top + 15) + 'px';
+      inspector.innerHTML = `
+        <div><b>Coords:</b> [${r}, ${c}]</div>
+        <div><b>Elevation:</b> ${cell.elev.toFixed(3)}m</div>
+        <div><b>Slope:</b> ${(cell.slope * 90).toFixed(1)}°</div>
+        <div><b>Cost:</b> ${cell.cost >= 9000 ? 'INF' : cell.cost.toFixed(2)}</div>
+        <div><b>Terrain:</b> ${type}</div>
+      `;
+    } else {
+      inspector.style.display = 'none';
+    }
+  });
+  canvas.addEventListener('mouseleave', () => inspector.style.display = 'none');
 
   genTerrain();
   buildAlgoCards();
